@@ -5,6 +5,7 @@
 /*****************************************************************************/
 
 #include <eigen3/Eigen/Core>
+#include <eigen3/Eigen/Geometry>
 
 /*****************************************************************************/
 // Defines
@@ -15,6 +16,8 @@ typedef Eigen::Vector3f point_t;
 typedef Eigen::Vector3f orientation_t;
 
 typedef Eigen::Vector4f quat_t;
+
+typedef Eigen::Vector4f homog_point_t;
 
 typedef Eigen::Vector3f vector_t;
 
@@ -35,6 +38,8 @@ typedef struct {
 typedef Eigen::Matrix3f rotation_matrix_t;
 
 typedef Eigen::Matrix4f transform_t;
+
+typedef Eigen::Matrix4f homog_transform_t;
 
 /*****************************************************************************/
 // Function declarations

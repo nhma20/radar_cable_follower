@@ -32,6 +32,7 @@ find_package(OpenCV REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(tf2_msgs REQUIRED)
 find_package(image_transport REQUIRED)
 
 
@@ -48,6 +49,21 @@ ament_target_dependencies(drone_frame_broadcaster
   tf2_ros
 )
 install(TARGETS drone_frame_broadcaster DESTINATION lib/${PROJECT_NAME})
+
+
+add_executable(radar_pointcloud_filter
+  src/radar_pointcloud_filter.cpp
+  src/geometry.cpp
+)
+ament_target_dependencies(radar_pointcloud_filter
+  rclcpp
+  sensor_msgs
+  px4_msgs
+  tf2
+  tf2_ros
+  tf2_msgs
+)
+install(TARGETS radar_pointcloud_filter DESTINATION lib/${PROJECT_NAME})
 
 
 add_executable(lidar_to_mmwave_node
@@ -89,10 +105,5 @@ install(DIRECTORY
   DESTINATION share/${PROJECT_NAME}
 )
 
-# install the config directory
-install(DIRECTORY
-  config
-  DESTINATION share/${PROJECT_NAME}/
-)
 
 ament_package()

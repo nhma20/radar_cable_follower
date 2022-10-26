@@ -25,7 +25,7 @@ class LidarToMmwave : public rclcpp::Node
 //Messages are sent based on a timed callback.
 	public:
 		LidarToMmwave() : Node("lidar_to_mmwave_converter") {
-			lidar_to_mmwave_pcl_publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/lidar_to_mmwave_pcl", 10);
+			lidar_to_mmwave_pcl_publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/iwr6843_pcl", 10);
 
 			subscription_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
 			"/dist_sensor/laser_scan",	10,
@@ -51,6 +51,9 @@ class LidarToMmwave : public rclcpp::Node
 
 // converts lidar data to pointcloud of detected objects to simulate sparse mmwave
 void LidarToMmwave::lidar_to_mmwave_pcl(const sensor_msgs::msg::LaserScan::SharedPtr _msg){
+
+	// RCLCPP_INFO(this->get_logger(),  "Got laser scan");
+
 	float angle_increment = _msg->angle_increment;
 	float angle_min = _msg->angle_min;
 	float angle_max = _msg->angle_max;
@@ -175,6 +178,7 @@ void LidarToMmwave::lidar_to_mmwave_pcl(const sensor_msgs::msg::LaserScan::Share
 		}
 	}
 	// publish PointCloud2 msg
+	// RCLCPP_INFO(this->get_logger(),  "Publishing radar pcl");
 	this->lidar_to_mmwave_pcl_publisher_->publish(pcl2_msg);
 }
 
