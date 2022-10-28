@@ -35,6 +35,11 @@ find_package(tf2_ros REQUIRED)
 find_package(tf2_msgs REQUIRED)
 find_package(image_transport REQUIRED)
 
+find_package(PCL 1.2 REQUIRED)
+
+include_directories(${PCL_INCLUDE_DIRS})
+link_directories(${PCL_LIBRARY_DIRS})
+add_definitions(${PCL_DEFINITIONS})
 
 add_executable(drone_frame_broadcaster
   src/drone_frame_broadcaster_node.cpp
@@ -51,9 +56,27 @@ ament_target_dependencies(drone_frame_broadcaster
 install(TARGETS drone_frame_broadcaster DESTINATION lib/${PROJECT_NAME})
 
 
+# add_executable(radar_pointcloud_filter
+#   src/radar_pointcloud_filter.cpp
+#   src/geometry.cpp
+# )
+# ament_target_dependencies(radar_pointcloud_filter
+#   rclcpp
+#   sensor_msgs
+#   px4_msgs
+#   tf2
+#   tf2_ros
+#   tf2_msgs
+#   PCL
+# )
+# install(TARGETS radar_pointcloud_filter DESTINATION lib/${PROJECT_NAME})
+
 add_executable(radar_pointcloud_filter
   src/radar_pointcloud_filter.cpp
   src/geometry.cpp
+)
+target_link_libraries (radar_pointcloud_filter 
+  ${PCL_LIBRARIES}
 )
 ament_target_dependencies(radar_pointcloud_filter
   rclcpp
@@ -62,8 +85,10 @@ ament_target_dependencies(radar_pointcloud_filter
   tf2
   tf2_ros
   tf2_msgs
+  PCL
 )
 install(TARGETS radar_pointcloud_filter DESTINATION lib/${PROJECT_NAME})
+
 
 
 add_executable(lidar_to_mmwave_node

@@ -1,3 +1,4 @@
+// ROS2 includes
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp/qos.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
@@ -8,6 +9,7 @@
 #include <tf2/exceptions.h>
 #include "geometry.h"
 
+ // MISC includes
 #include <algorithm>
 #include <cstdlib>
 #include <stdlib.h> 
@@ -19,6 +21,18 @@
 #include <vector>
 #include <string>
 
+// PCL includes
+#include <pcl/ModelCoefficients.h>
+#include <pcl/point_types.h>
+#include <pcl/io/pcd_io.h>
+#include <pcl/filters/extract_indices.h>
+#include <pcl/filters/voxel_grid.h>
+#include <pcl/features/normal_3d.h>
+#include <pcl/search/kdtree.h>
+#include <pcl/sample_consensus/method_types.h>
+#include <pcl/sample_consensus/model_types.h>
+#include <pcl/segmentation/sac_segmentation.h>
+#include <pcl/segmentation/extract_clusters.h>
 
 using namespace std::chrono_literals;
 
@@ -82,11 +96,17 @@ class RadarPCLFilter : public rclcpp::Node
 
 		bool _first_message = false;
 
+		int _concat_size = 200;
+
+		std::vector<int> _concat_history; 
+
 		void transform_pointcloud_to_world(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
 
 		void read_pointcloud(const sensor_msgs::msg::PointCloud2::SharedPtr msg, Eigen::MatrixXf * data_holder);
 
 		void filter_pointcloud(float ground_threshold, float drone_threshold, Eigen::MatrixXf * data_in, Eigen::MatrixXf * data_out);
+
+		void concatenate_poincloud(Eigen::MatrixXf * new_points, Eigen::MatrixXf * concat_points);
 
 		void create_pointcloud_msg(Eigen::MatrixXf * data, auto * pcl_msg);
 };
@@ -271,3 +291,4 @@ int main(int argc, char *argv[])
 	rclcpp::shutdown();
 	return 0;
 }
+
