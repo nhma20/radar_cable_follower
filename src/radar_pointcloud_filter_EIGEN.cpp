@@ -34,12 +34,6 @@
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/segmentation/extract_clusters.h>
 
-// #include <pcl/io/ply_io.h>
-#include <pcl/point_cloud.h>
-// #include <pcl/console/parse.h>
-#include <pcl/common/transforms.h>
-// #include <pcl/visualization/pcl_visualizer.h>
-
 using namespace std::chrono_literals;
 
 //creates a RadarPCLFilter class that subclasses the generic rclcpp::Node base class.
@@ -108,28 +102,24 @@ class RadarPCLFilter : public rclcpp::Node
 
 		void transform_pointcloud_to_world(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
 
-		void read_pointcloud(const sensor_msgs::msg::PointCloud2::SharedPtr msg, 
-										pcl::PointCloud<pcl::PointXYZ>::Ptr cloud);
+		void read_pointcloud(const sensor_msgs::msg::PointCloud2::SharedPtr msg, Eigen::MatrixXf * data_holder);
 
-		void filter_pointcloud(float ground_threshold, float drone_threshold, 
-								pcl::PointCloud<pcl::PointXYZ>::Ptr cloud);
+		void filter_pointcloud(float ground_threshold, float drone_threshold, Eigen::MatrixXf * data_in, Eigen::MatrixXf * data_out);
 
 		void concatenate_poincloud(Eigen::MatrixXf * new_points, Eigen::MatrixXf * concat_points);
 
-		void create_pointcloud_msg(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, auto * pcl_msg);
+		void create_pointcloud_msg(Eigen::MatrixXf * data, auto * pcl_msg);
 };
 
 
 
 
-void RadarPCLFilter::create_pointcloud_msg(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, auto * pcl_msg) {
+void RadarPCLFilter::create_pointcloud_msg(Eigen::MatrixXf * data, auto * pcl_msg) {
 
   // create PointCloud2 msg
 	//https://github.com/ros-drivers/velodyne/blob/master/velodyne_laserscan/tests/system.cpp
-	int pcl_size = cloud->size();
+	int pcl_size = data->cols();
 	auto pcl2_msg = sensor_msgs::msg::PointCloud2();
-	const uint32_t POINT_STEP = 12;
-
 	pcl_msg->header = std_msgs::msg::Header();
 	pcl_msg->header.stamp = this->now();
 	std::string frameID = "world";
@@ -147,13 +137,10 @@ void RadarPCLFilter::create_pointcloud_msg(pcl::PointCloud<pcl::PointXYZ>::Ptr c
 	pcl_msg->fields[2].offset = 8;
 	pcl_msg->fields[2].datatype = sensor_msgs::msg::PointField::FLOAT32;
 	pcl_msg->fields[2].count = 1;
-
+	const uint32_t POINT_STEP = 12;
 	if(pcl_size > 0){
 		pcl_msg->data.resize(std::max((size_t)1, (size_t)pcl_size) * POINT_STEP, 0x00);
-	} else {
-        return;
-    }
-
+	}
 	pcl_msg->point_step = POINT_STEP; // size (bytes) of 1 point (float32 * dimensions (3 when xyz))
 	pcl_msg->row_step = pcl_msg->data.size();//pcl_msg->point_step * pcl_msg->width; // only 1 row because unordered
 	pcl_msg->height = 1;  // because unordered cloud
@@ -161,77 +148,68 @@ void RadarPCLFilter::create_pointcloud_msg(pcl::PointCloud<pcl::PointXYZ>::Ptr c
 	pcl_msg->is_dense = false; // there may be invalid points
 
 	// fill PointCloud2 msg data
-	uint8_t *ptr = pcl_msg->data.data();
-
-	for (size_t i = 0; i < (size_t)pcl_size; i++)
-	{
-		pcl::PointXYZ point = (*cloud)[i];
-
-        *(reinterpret_cast<float*>(ptr + 0)) = point.x;
-        *(reinterpret_cast<float*>(ptr + 4)) = point.y;
-        *(reinterpret_cast<float*>(ptr + 8)) = point.z;
-        ptr += POINT_STEP;
+	if(pcl_size > 0){
+		uint8_t *ptr = pcl_msg->data.data();
+		for (size_t i = 0; i < (size_t)pcl_size; i++)
+		{
+			*(reinterpret_cast<float*>(ptr + 0)) = data->coeffRef(0,i);
+			*(reinterpret_cast<float*>(ptr + 4)) = data->coeffRef(1,i);
+			*(reinterpret_cast<float*>(ptr + 8)) = data->coeffRef(2,i);
+			ptr += POINT_STEP;
+		}
 	}
-	
 }
 
 
-void RadarPCLFilter::filter_pointcloud(float ground_threshold, float drone_threshold, 
-										pcl::PointCloud<pcl::PointXYZ>::Ptr cloud) {
+void RadarPCLFilter::filter_pointcloud(float ground_threshold, float drone_threshold, Eigen::MatrixXf * data_in, Eigen::MatrixXf * data_out) {
 	
-	int pcl_size = cloud->size();
+	int pcl_size = data_in->cols();
 
-	// std::vector<int> remove_indeces;
-	pcl::PointIndices::Ptr inliers(new pcl::PointIndices());
+	int filtered_pcl_size = 0;
+
 
 	for (size_t i = 0; i < (size_t)pcl_size; i++)
 	{
-		if ( ( cloud->at(i).z > ground_threshold )  && ( cloud->at(i).z < (_height_above_ground-drone_threshold) ) )
+		if ( ( data_in->coeffRef(2,i) > ground_threshold )  && ( data_in->coeffRef(2,i) < (_height_above_ground-drone_threshold) ) )
 		{
-			inliers->indices.push_back(i);
+			data_out->col(filtered_pcl_size) = data_in->col(i);
+			filtered_pcl_size++;
+			// RCLCPP_INFO(this->get_logger(), "valid point");
 		}
 		// else {
-		// 	inliers->indices.push_back(i);
+		// 	RCLCPP_INFO(this->get_logger(), "invalid point");
+		// 	RCLCPP_INFO(this->get_logger(), "Height: %f", _height_above_ground);
+		// 	RCLCPP_INFO(this->get_logger(), "Point: %f", data_in->coeffRef(2,i));
+
 		// }
 	}
 
-	pcl::ExtractIndices<pcl::PointXYZ> extract;
-	extract.setInputCloud(cloud);
-	extract.setIndices(inliers);
-	extract.filter(*cloud);
+	data_out->conservativeResize(4,filtered_pcl_size);
+
 }
 
 
-void RadarPCLFilter::read_pointcloud(const sensor_msgs::msg::PointCloud2::SharedPtr msg, 
-										pcl::PointCloud<pcl::PointXYZ>::Ptr cloud) {
+void RadarPCLFilter::read_pointcloud(const sensor_msgs::msg::PointCloud2::SharedPtr msg, Eigen::MatrixXf * data_holder) {
 
-	// read PointCloud2 msg data
-	int pcl_size = msg->width;
-	uint8_t *ptr = msg->data.data();
-	const uint32_t POINT_STEP = 12;
+  // read PointCloud2 msg data
+  int pcl_size = msg->width;
+  uint8_t *ptr = msg->data.data();
+  const uint32_t POINT_STEP = 12;
 
-	for (size_t i = 0; i < (size_t)pcl_size; i++) 
-	{
-		pcl::PointXYZ point(
-				(float)(*(reinterpret_cast<float*>(ptr + 0))),
-				(float)(*(reinterpret_cast<float*>(ptr + 4))),
-				(float)(*(reinterpret_cast<float*>(ptr + 8)))
-			);
+  for (size_t i = 0; i < (size_t)pcl_size; i++) {
 
-		cloud->push_back(point);
+	data_holder->coeffRef(0,i) = *(reinterpret_cast<float*>(ptr + 0)); // x
+	data_holder->coeffRef(1,i) = *(reinterpret_cast<float*>(ptr + 4)); // y
+	data_holder->coeffRef(2,i) = *(reinterpret_cast<float*>(ptr + 8)); // z
+	data_holder->coeffRef(3,i) = 1.0;
 
-		ptr += POINT_STEP;
-	}
-}   
+	ptr += POINT_STEP;
 
+  }
+}
 
 
 void RadarPCLFilter::transform_pointcloud_to_world(const sensor_msgs::msg::PointCloud2::SharedPtr msg){
-
-	if (msg->width < 1)
-	{
-		return;
-	}
 
 	geometry_msgs::msg::TransformStamped t;
 
@@ -268,31 +246,34 @@ void RadarPCLFilter::transform_pointcloud_to_world(const sensor_msgs::msg::Point
 
 	// transform points in pointcloud
 
-	pcl::PointCloud<pcl::PointXYZ>::Ptr local_points (new pcl::PointCloud<pcl::PointXYZ>);
+	int pcl_size = msg->width;
 
-	RadarPCLFilter::read_pointcloud(msg, local_points);
+	Eigen::MatrixXf local_points(4,pcl_size);
 
-	pcl::PointCloud<pcl::PointXYZ>::Ptr world_points (new pcl::PointCloud<pcl::PointXYZ>);
+	RadarPCLFilter::read_pointcloud(msg, &local_points);
 
-	pcl::transformPointCloud (*local_points, *world_points, world_to_drone);
+	Eigen::MatrixXf world_points(4,pcl_size);
 
-	// filter ground and drone points 
+	world_points = world_to_drone * local_points;
 
-	RadarPCLFilter::filter_pointcloud(1, 0.2, world_points);
+	// filter pointcloud based on distance
+
+	Eigen::MatrixXf filtered_world_points(4,pcl_size);
+
+	RadarPCLFilter::filter_pointcloud(1, 0.2, &world_points, &filtered_world_points);
 
 	// publish transformed pointcloud
 
 	auto pcl_msg = sensor_msgs::msg::PointCloud2();
 
-	RCLCPP_INFO(this->get_logger(), "World cloud size: %d", world_points->size());
-
-	RadarPCLFilter::create_pointcloud_msg(world_points, &pcl_msg);
+	RadarPCLFilter::create_pointcloud_msg(&filtered_world_points, &pcl_msg);
 
 	if (_first_message == false)
 	{
 		RCLCPP_INFO(this->get_logger(), "Published transformed pointcloud");
 		_first_message = true;
 	}
+	
 
 	output_pointcloud_pub->publish(pcl_msg);  
 
