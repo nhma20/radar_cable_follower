@@ -80,6 +80,8 @@ class RadarPCLFilter : public rclcpp::Node
 
 		int _t_tries = 0;
 
+		bool _first_message = false;
+
 		void transform_pointcloud_to_world(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
 
 		void read_pointcloud(const sensor_msgs::msg::PointCloud2::SharedPtr msg, Eigen::MatrixXf * data_holder);
@@ -128,7 +130,7 @@ void RadarPCLFilter::create_pointcloud_msg(Eigen::MatrixXf * data, auto * pcl_ms
 	// fill PointCloud2 msg data
 	if(pcl_size > 0){
 		uint8_t *ptr = pcl_msg->data.data();
-		for (size_t i = 0; i < pcl_size; i++)
+		for (size_t i = 0; i < (size_t)pcl_size; i++)
 		{
 			*(reinterpret_cast<float*>(ptr + 0)) = data->coeffRef(0,i);
 			*(reinterpret_cast<float*>(ptr + 4)) = data->coeffRef(1,i);
@@ -146,7 +148,7 @@ void RadarPCLFilter::filter_pointcloud(float ground_threshold, float drone_thres
 	int filtered_pcl_size = 0;
 
 
-	for (size_t i = 0; i < pcl_size; i++)
+	for (size_t i = 0; i < (size_t)pcl_size; i++)
 	{
 		if ( ( data_in->coeffRef(2,i) > ground_threshold )  && ( data_in->coeffRef(2,i) < (_height_above_ground-drone_threshold) ) )
 		{
@@ -174,7 +176,7 @@ void RadarPCLFilter::read_pointcloud(const sensor_msgs::msg::PointCloud2::Shared
   uint8_t *ptr = msg->data.data();
   const uint32_t POINT_STEP = 12;
 
-  for (size_t i = 0; i < pcl_size; i++) {
+  for (size_t i = 0; i < (size_t)pcl_size; i++) {
 
 	data_holder->coeffRef(0,i) = *(reinterpret_cast<float*>(ptr + 0)); // x
 	data_holder->coeffRef(1,i) = *(reinterpret_cast<float*>(ptr + 4)); // y
@@ -245,6 +247,13 @@ void RadarPCLFilter::transform_pointcloud_to_world(const sensor_msgs::msg::Point
 	auto pcl_msg = sensor_msgs::msg::PointCloud2();
 
 	RadarPCLFilter::create_pointcloud_msg(&filtered_world_points, &pcl_msg);
+
+	if (_first_message == false)
+	{
+		RCLCPP_INFO(this->get_logger(), "Published transformed pointcloud");
+		_first_message = true;
+	}
+	
 
 	output_pointcloud_pub->publish(pcl_msg);  
 
