@@ -19,6 +19,7 @@
 #include <math.h>  
 #include <limits>
 #include <vector>
+#include <deque>
 #include <string>
 
 // PCL includes
@@ -33,12 +34,11 @@
 #include <pcl/sample_consensus/model_types.h>
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/segmentation/extract_clusters.h>
-
-// #include <pcl/io/ply_io.h>
 #include <pcl/point_cloud.h>
-// #include <pcl/console/parse.h>
 #include <pcl/common/transforms.h>
-// #include <pcl/visualization/pcl_visualizer.h>
+#include <pcl/sample_consensus/ransac.h>
+#include <pcl/sample_consensus/sac_model_line.h>
+
 
 using namespace std::chrono_literals;
 
@@ -48,6 +48,16 @@ class RadarPCLFilter : public rclcpp::Node
 	public:
 		RadarPCLFilter() : Node("radar_pcl_filter_node") {
 			
+			// Params
+			this->declare_parameter<int>("concat_size", 200);
+			this->get_parameter("concat_size", _concat_size);
+
+			this->declare_parameter<float>("leaf_size", 0.75);
+			this->get_parameter("leaf_size", _leaf_size);
+
+			this->declare_parameter<float>("model_thresh", 0.5);
+			this->get_parameter("model_thresh", _model_thresh);
+
 			raw_pcl_subscription_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
 			"/iwr6843_pcl",	10,
 			std::bind(&RadarPCLFilter::transform_pointcloud_to_world, this, std::placeholders::_1));
@@ -81,6 +91,9 @@ class RadarPCLFilter : public rclcpp::Node
 
 				std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
+				pcl::PointCloud<pcl::PointXYZ>::Ptr tmp_cloud (new pcl::PointCloud<pcl::PointXYZ>);
+				_concat_points = tmp_cloud;
+
 			}
 		}
 
@@ -102,9 +115,15 @@ class RadarPCLFilter : public rclcpp::Node
 
 		bool _first_message = false;
 
-		int _concat_size = 200;
+		int _concat_size; 
 
-		std::vector<int> _concat_history; 
+		float _leaf_size;
+
+		float _model_thresh;
+
+		std::deque<int> _concat_history; 
+
+		pcl::PointCloud<pcl::PointXYZ>::Ptr _concat_points;
 
 		void transform_pointcloud_to_world(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
 
@@ -114,7 +133,10 @@ class RadarPCLFilter : public rclcpp::Node
 		void filter_pointcloud(float ground_threshold, float drone_threshold, 
 								pcl::PointCloud<pcl::PointXYZ>::Ptr cloud);
 
-		void concatenate_poincloud(Eigen::MatrixXf * new_points, Eigen::MatrixXf * concat_points);
+		void concatenate_poincloud(pcl::PointCloud<pcl::PointXYZ>::Ptr new_points);
+
+		void direction_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
+									pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered);
 
 		void create_pointcloud_msg(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, auto * pcl_msg);
 };
@@ -176,12 +198,66 @@ void RadarPCLFilter::create_pointcloud_msg(pcl::PointCloud<pcl::PointXYZ>::Ptr c
 }
 
 
+void RadarPCLFilter::direction_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
+											pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered) {
+
+	pcl::SampleConsensusModelLine<pcl::PointXYZ>::Ptr
+		line_model(new pcl::SampleConsensusModelLine<pcl::PointXYZ> (cloud_in));
+
+	std::vector<int> inliers;
+	pcl::RandomSampleConsensus<pcl::PointXYZ> ransac (line_model);
+    ransac.setDistanceThreshold ((float)_model_thresh);
+    ransac.computeModel();
+    ransac.getInliers(inliers);
+
+	pcl::copyPointCloud (*cloud_in, inliers, *cloud_filtered);
+}
+
+
+// void RadarPCLFilter::concatenate_poincloud(pcl::PointCloud<pcl::PointXYZ>::Ptr new_points) {
+// // concatenates pointclouds until _concat_size is reached then keeps cloud at that size
+// 	this->get_parameter("concat_size", _concat_size);
+
+// 	*_concat_points += *new_points;
+
+// 	_concat_history.push_back(new_points->size());
+
+// 	if (_concat_history.size() > _concat_size)
+// 	{
+// 		pcl::PointIndices::Ptr inliers(new pcl::PointIndices());
+
+// 		for (size_t i = 0; i < (size_t)_concat_history.front(); i++)
+// 		{
+// 			inliers->indices.push_back(i);
+// 		}
+
+// 		pcl::ExtractIndices<pcl::PointXYZ> extract;
+// 		extract.setInputCloud(_concat_points);
+// 		extract.setIndices(inliers);
+// 		extract.setNegative(true);
+// 		extract.filter(*_concat_points);
+
+// 		_concat_history.pop_front();
+// 	}
+// }
+void RadarPCLFilter::concatenate_poincloud(pcl::PointCloud<pcl::PointXYZ>::Ptr new_points) {
+// Continuously adds new points and downsamples cloud with voxed grid
+	this->get_parameter("leaf_size", _leaf_size);
+
+	*_concat_points += *new_points;
+
+	static pcl::VoxelGrid<pcl::PointXYZ> voxel_grid;
+	voxel_grid.setInputCloud (_concat_points);
+	voxel_grid.setLeafSize ((float)_leaf_size, (float)_leaf_size, (float)_leaf_size);
+	voxel_grid.filter (*_concat_points);
+}
+
+
 void RadarPCLFilter::filter_pointcloud(float ground_threshold, float drone_threshold, 
 										pcl::PointCloud<pcl::PointXYZ>::Ptr cloud) {
 	
 	int pcl_size = cloud->size();
 
-	// std::vector<int> remove_indeces;
 	pcl::PointIndices::Ptr inliers(new pcl::PointIndices());
 
 	for (size_t i = 0; i < (size_t)pcl_size; i++)
@@ -190,9 +266,6 @@ void RadarPCLFilter::filter_pointcloud(float ground_threshold, float drone_thres
 		{
 			inliers->indices.push_back(i);
 		}
-		// else {
-		// 	inliers->indices.push_back(i);
-		// }
 	}
 
 	pcl::ExtractIndices<pcl::PointXYZ> extract;
@@ -280,21 +353,28 @@ void RadarPCLFilter::transform_pointcloud_to_world(const sensor_msgs::msg::Point
 
 	RadarPCLFilter::filter_pointcloud(1, 0.2, world_points);
 
-	// publish transformed pointcloud
+	if (world_points->size() < 1)
+	{
+		return;
+	}
 
-	auto pcl_msg = sensor_msgs::msg::PointCloud2();
+	// publish transformed pointcloud
 
 	RCLCPP_INFO(this->get_logger(), "World cloud size: %d", world_points->size());
 
-	RadarPCLFilter::create_pointcloud_msg(world_points, &pcl_msg);
+	RadarPCLFilter::concatenate_poincloud(world_points);
 
-	if (_first_message == false)
-	{
-		RCLCPP_INFO(this->get_logger(), "Published transformed pointcloud");
-		_first_message = true;
-	}
+	pcl::PointCloud<pcl::PointXYZ>::Ptr extracted_cloud (new pcl::PointCloud<pcl::PointXYZ>);
+	RadarPCLFilter::direction_extraction(_concat_points, extracted_cloud);
+
+	auto pcl_msg = sensor_msgs::msg::PointCloud2();
+	RadarPCLFilter::create_pointcloud_msg(extracted_cloud, &pcl_msg);
 
 	output_pointcloud_pub->publish(pcl_msg);  
+	// auto pcl_msg = sensor_msgs::msg::PointCloud2();
+	// RadarPCLFilter::create_pointcloud_msg(_concat_points, &pcl_msg);
+
+	// output_pointcloud_pub->publish(pcl_msg);  
 
 }
 
