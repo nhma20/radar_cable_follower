@@ -119,7 +119,6 @@ quat_t eulToQuat(orientation_t eul) {
     quat(3) = q.w();
 
     return quat;
-
 }
 
 transform_t getTransformMatrix(vector_t vec, quat_t quat) {

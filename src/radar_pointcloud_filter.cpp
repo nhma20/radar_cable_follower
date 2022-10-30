@@ -3,6 +3,7 @@
 #include <rclcpp/qos.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/msg/point_field.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
 #include <px4_msgs/msg/vehicle_odometry.hpp>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/buffer.h>
@@ -16,7 +17,8 @@
 #include <iostream>
 #include <chrono>
 #include <ctime>    
-#include <math.h>  
+#include <math.h> 
+#include <cmath> 
 #include <limits>
 #include <vector>
 #include <deque>
@@ -39,6 +41,7 @@
 #include <pcl/sample_consensus/ransac.h>
 #include <pcl/sample_consensus/sac_model_line.h>
 
+#define DEG_PER_RAD 57.296
 
 using namespace std::chrono_literals;
 
@@ -58,11 +61,16 @@ class RadarPCLFilter : public rclcpp::Node
 			this->declare_parameter<float>("model_thresh", 0.5);
 			this->get_parameter("model_thresh", _model_thresh);
 
+			this->declare_parameter<float>("ground_threshold", 5);
+			this->get_parameter("ground_threshold", _ground_threshold);
+
 			raw_pcl_subscription_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
 			"/iwr6843_pcl",	10,
 			std::bind(&RadarPCLFilter::transform_pointcloud_to_world, this, std::placeholders::_1));
 
 			output_pointcloud_pub = this->create_publisher<sensor_msgs::msg::PointCloud2>("/world_pcl", 10);
+
+			pl_direction_pub = this->create_publisher<geometry_msgs::msg::PoseStamped>("/powerline_direction", 10);
 
 			tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
 			transform_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -106,8 +114,13 @@ class RadarPCLFilter : public rclcpp::Node
   		std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
 
 		rclcpp::TimerBase::SharedPtr timer_;
+
 		rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr output_pointcloud_pub;
+		rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pl_direction_pub;
+
 		rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr raw_pcl_subscription_;
+
+		float _ground_threshold;
 
 		float _height_above_ground = 0;
 
@@ -120,6 +133,10 @@ class RadarPCLFilter : public rclcpp::Node
 		float _leaf_size;
 
 		float _model_thresh;
+
+		float _powerline_world_yaw; // +90 to -90 deg relative to x-axis
+
+		vector_t _t_xyz;
 
 		std::deque<int> _concat_history; 
 
@@ -140,7 +157,6 @@ class RadarPCLFilter : public rclcpp::Node
 
 		void create_pointcloud_msg(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, auto * pcl_msg);
 };
-
 
 
 
@@ -198,19 +214,81 @@ void RadarPCLFilter::create_pointcloud_msg(pcl::PointCloud<pcl::PointXYZ>::Ptr c
 }
 
 
+// void RadarPCLFilter::direction_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
+// 											pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered) {
+
+// 	pcl::SampleConsensusModelLine<pcl::PointXYZ>::Ptr
+// 		line_model(new pcl::SampleConsensusModelLine<pcl::PointXYZ> (cloud_in));
+
+// 	std::vector<int> inliers;
+// 	pcl::RandomSampleConsensus<pcl::PointXYZ> ransac (line_model);
+//     ransac.setDistanceThreshold ((float)_model_thresh);
+//     ransac.computeModel();
+//     ransac.getInliers(inliers);
+
+// 	pcl::copyPointCloud (*cloud_in, inliers, *cloud_filtered);
+// }
 void RadarPCLFilter::direction_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
 											pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered) {
 
-	pcl::SampleConsensusModelLine<pcl::PointXYZ>::Ptr
-		line_model(new pcl::SampleConsensusModelLine<pcl::PointXYZ> (cloud_in));
+	pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients);
+	pcl::PointIndices::Ptr inliers (new pcl::PointIndices);
+	// Create the segmentation object
+	pcl::SACSegmentation<pcl::PointXYZ> seg;
+	// Optional
+	seg.setOptimizeCoefficients (true);
+	// Mandatory
+	seg.setModelType (pcl::SACMODEL_LINE);
+	seg.setMethodType (pcl::SAC_RANSAC);
+	seg.setDistanceThreshold ((float)_model_thresh);
 
-	std::vector<int> inliers;
-	pcl::RandomSampleConsensus<pcl::PointXYZ> ransac (line_model);
-    ransac.setDistanceThreshold ((float)_model_thresh);
-    ransac.computeModel();
-    ransac.getInliers(inliers);
+	seg.setInputCloud (cloud_in);
+	seg.segment (*inliers, *coefficients);
 
-	pcl::copyPointCloud (*cloud_in, inliers, *cloud_filtered);
+	pcl::copyPointCloud (*cloud_in, *inliers, *cloud_filtered);
+	
+	// RCLCPP_INFO(this->get_logger(),  "%f", coefficients->values[3]); // X coordinate of a line's direction
+	// RCLCPP_INFO(this->get_logger(),  "%f", coefficients->values[4]); // Y coordinate of a line's direction
+	// RCLCPP_INFO(this->get_logger(),  "%f", coefficients->values[5]); // Z coordinate of a line's direction
+
+	if ( abs(coefficients->values[5]) < 0.25)
+	{
+		float z_factor = 1 / sqrt( pow(coefficients->values[3],2) + pow(coefficients->values[4],2) );
+
+		_powerline_world_yaw = -1 * (abs(coefficients->values[3]) / coefficients->values[3]) * acos(abs(coefficients->values[3])) * z_factor;
+
+		RCLCPP_INFO(this->get_logger(),  "Powerline yaw: %f", (_powerline_world_yaw*DEG_PER_RAD));
+	
+		orientation_t yaw_eul (
+			0.0,
+			0.0,
+			_powerline_world_yaw
+		);
+
+		quat_t yaw_quat = eulToQuat(yaw_eul);
+
+		// RCLCPP_INFO(this->get_logger(),  "Q1: %f", yaw_quat(3));
+		// RCLCPP_INFO(this->get_logger(),  "Q2: %f", yaw_quat(0));
+		// RCLCPP_INFO(this->get_logger(),  "Q3: %f", yaw_quat(1));
+		// RCLCPP_INFO(this->get_logger(),  "Q4: %f", yaw_quat(2));
+
+		auto pose_msg = geometry_msgs::msg::PoseStamped();
+
+		pose_msg.header = std_msgs::msg::Header();
+		pose_msg.header.stamp = this->now();
+		pose_msg.header.frame_id = "world";
+		pose_msg.pose.orientation.x = yaw_quat(0);
+		pose_msg.pose.orientation.y = yaw_quat(1);
+		pose_msg.pose.orientation.z = yaw_quat(2);
+		pose_msg.pose.orientation.w = yaw_quat(3);
+		pose_msg.pose.position.x = _t_xyz(0);
+		pose_msg.pose.position.y = _t_xyz(1);
+		pose_msg.pose.position.z = _t_xyz(2);
+
+
+		pl_direction_pub->publish(pose_msg);
+
+	}	
 }
 
 
@@ -326,10 +404,9 @@ void RadarPCLFilter::transform_pointcloud_to_world(const sensor_msgs::msg::Point
 
 	_height_above_ground = t.transform.translation.z;
 
-	vector_t t_xyz;
-	t_xyz(0) = t.transform.translation.x;
-	t_xyz(1) = t.transform.translation.y;
-	t_xyz(2) = t.transform.translation.z;
+	_t_xyz(0) = t.transform.translation.x;
+	_t_xyz(1) = t.transform.translation.y;
+	_t_xyz(2) = t.transform.translation.z;
 
 	quat_t t_rot;
 	t_rot(0) = t.transform.rotation.x;
@@ -337,7 +414,7 @@ void RadarPCLFilter::transform_pointcloud_to_world(const sensor_msgs::msg::Point
 	t_rot(2) = t.transform.rotation.z;
 	t_rot(3) = t.transform.rotation.w;
 
-	homog_transform_t world_to_drone = getTransformMatrix(t_xyz, t_rot);
+	homog_transform_t world_to_drone = getTransformMatrix(_t_xyz, t_rot);
 
 	// transform points in pointcloud
 
@@ -350,8 +427,8 @@ void RadarPCLFilter::transform_pointcloud_to_world(const sensor_msgs::msg::Point
 	pcl::transformPointCloud (*local_points, *world_points, world_to_drone);
 
 	// filter ground and drone points 
-
-	RadarPCLFilter::filter_pointcloud(1, 0.2, world_points);
+	this->get_parameter("ground_threshold", _ground_threshold);
+	RadarPCLFilter::filter_pointcloud(_ground_threshold, 0.2, world_points);
 
 	if (world_points->size() < 1)
 	{
@@ -365,16 +442,19 @@ void RadarPCLFilter::transform_pointcloud_to_world(const sensor_msgs::msg::Point
 	RadarPCLFilter::concatenate_poincloud(world_points);
 
 	pcl::PointCloud<pcl::PointXYZ>::Ptr extracted_cloud (new pcl::PointCloud<pcl::PointXYZ>);
-	RadarPCLFilter::direction_extraction(_concat_points, extracted_cloud);
+	if (world_points->size() > 1)
+	{
+		RadarPCLFilter::direction_extraction(_concat_points, extracted_cloud);
+	}
+	
+
+	// auto pcl_msg = sensor_msgs::msg::PointCloud2();
+	// RadarPCLFilter::create_pointcloud_msg(extracted_cloud, &pcl_msg);
+	// output_pointcloud_pub->publish(pcl_msg);  
 
 	auto pcl_msg = sensor_msgs::msg::PointCloud2();
-	RadarPCLFilter::create_pointcloud_msg(extracted_cloud, &pcl_msg);
-
+	RadarPCLFilter::create_pointcloud_msg(_concat_points, &pcl_msg);
 	output_pointcloud_pub->publish(pcl_msg);  
-	// auto pcl_msg = sensor_msgs::msg::PointCloud2();
-	// RadarPCLFilter::create_pointcloud_msg(_concat_points, &pcl_msg);
-
-	// output_pointcloud_pub->publish(pcl_msg);  
 
 }
 
