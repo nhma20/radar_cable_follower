@@ -41,6 +41,14 @@ typedef Eigen::Matrix4f transform_t;
 
 typedef Eigen::Matrix4f homog_transform_t;
 
+typedef struct {
+
+	point_t position;
+	quat_t quaternion;
+    
+} line_model_t;
+
+
 /*****************************************************************************/
 // Function declarations
 /*****************************************************************************/

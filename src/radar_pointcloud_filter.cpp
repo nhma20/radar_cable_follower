@@ -3,7 +3,9 @@
 #include <rclcpp/qos.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/msg/point_field.hpp>
+#include <geometry_msgs/msg/pose.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/pose_array.hpp>
 #include <px4_msgs/msg/vehicle_odometry.hpp>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/buffer.h>
@@ -27,19 +29,27 @@
 // PCL includes
 #include <pcl/ModelCoefficients.h>
 #include <pcl/point_types.h>
+#include <pcl/point_cloud.h>
+#include <pcl/common/transforms.h>
 #include <pcl/io/pcd_io.h>
 #include <pcl/filters/extract_indices.h>
 #include <pcl/filters/voxel_grid.h>
+#include <pcl/filters/crop_box.h>
 #include <pcl/features/normal_3d.h>
 #include <pcl/search/kdtree.h>
 #include <pcl/sample_consensus/method_types.h>
 #include <pcl/sample_consensus/model_types.h>
-#include <pcl/segmentation/sac_segmentation.h>
-#include <pcl/segmentation/extract_clusters.h>
-#include <pcl/point_cloud.h>
-#include <pcl/common/transforms.h>
 #include <pcl/sample_consensus/ransac.h>
 #include <pcl/sample_consensus/sac_model_line.h>
+#include <pcl/segmentation/sac_segmentation.h>
+#include <pcl/segmentation/extract_clusters.h>
+
+
+// typedef struct {
+// 	point_t position;
+// 	quat_t quaternion;
+// } line_model_t;
+
 
 #define DEG_PER_RAD 57.296
 
@@ -64,6 +74,16 @@ class RadarPCLFilter : public rclcpp::Node
 			this->declare_parameter<float>("ground_threshold", 5);
 			this->get_parameter("ground_threshold", _ground_threshold);
 
+			this->declare_parameter<float>("cluster_parallelism_threshold", 1.);
+			this->get_parameter("cluster_parallelism_threshold", _cluster_parallelism_threshold);
+
+			this->declare_parameter<int>("cluster_min_size", 25);
+			this->get_parameter("cluster_min_size", _cluster_min_size);
+
+			this->declare_parameter<float>("cluster_crop_radius", 20);
+			this->get_parameter("cluster_crop_radius", _cluster_crop_radius);
+
+
 			raw_pcl_subscription_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
 			"/iwr6843_pcl",	10,
 			std::bind(&RadarPCLFilter::transform_pointcloud_to_world, this, std::placeholders::_1));
@@ -71,6 +91,8 @@ class RadarPCLFilter : public rclcpp::Node
 			output_pointcloud_pub = this->create_publisher<sensor_msgs::msg::PointCloud2>("/world_pcl", 10);
 
 			pl_direction_pub = this->create_publisher<geometry_msgs::msg::PoseStamped>("/powerline_direction", 10);
+
+			direction_array_pub = this->create_publisher<geometry_msgs::msg::PoseArray>("/powerline_direction_array", 10);
 
 			tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
 			transform_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -117,6 +139,7 @@ class RadarPCLFilter : public rclcpp::Node
 
 		rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr output_pointcloud_pub;
 		rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pl_direction_pub;
+		rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr direction_array_pub;
 
 		rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr raw_pcl_subscription_;
 
@@ -136,6 +159,12 @@ class RadarPCLFilter : public rclcpp::Node
 
 		float _powerline_world_yaw; // +90 to -90 deg relative to x-axis
 
+		float _cluster_parallelism_threshold;
+
+		int _cluster_min_size;
+
+		float _cluster_crop_radius;
+
 		vector_t _t_xyz;
 
 		std::deque<int> _concat_history; 
@@ -150,10 +179,20 @@ class RadarPCLFilter : public rclcpp::Node
 		void filter_pointcloud(float ground_threshold, float drone_threshold, 
 								pcl::PointCloud<pcl::PointXYZ>::Ptr cloud);
 
-		void concatenate_poincloud(pcl::PointCloud<pcl::PointXYZ>::Ptr new_points);
+		void concatenate_poincloud_downsample(pcl::PointCloud<pcl::PointXYZ>::Ptr new_points,
+												pcl::PointCloud<pcl::PointXYZ>::Ptr concat_points);
+
+		void concatenate_poincloud_fixed_size(pcl::PointCloud<pcl::PointXYZ>::Ptr new_points);
+
+		void crop_distant_points(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
+									pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_cropped);
 
 		void direction_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
 									pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered);
+
+		std::vector<line_model_t> line_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in);									
+
+		plane_t create_plane(quat_t powerline_direction, point_t drone_xyz);
 
 		void create_pointcloud_msg(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, auto * pcl_msg);
 };
@@ -214,20 +253,146 @@ void RadarPCLFilter::create_pointcloud_msg(pcl::PointCloud<pcl::PointXYZ>::Ptr c
 }
 
 
-// void RadarPCLFilter::direction_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
-// 											pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered) {
+plane_t RadarPCLFilter::create_plane(quat_t powerline_direction, point_t drone_xyz) {
 
-// 	pcl::SampleConsensusModelLine<pcl::PointXYZ>::Ptr
-// 		line_model(new pcl::SampleConsensusModelLine<pcl::PointXYZ> (cloud_in));
+    vector_t unit_x(1, 0, 0);
 
-// 	std::vector<int> inliers;
-// 	pcl::RandomSampleConsensus<pcl::PointXYZ> ransac (line_model);
-//     ransac.setDistanceThreshold ((float)_model_thresh);
-//     ransac.computeModel();
-//     ransac.getInliers(inliers);
+    orientation_t eul = quatToEul(powerline_direction);
 
-// 	pcl::copyPointCloud (*cloud_in, inliers, *cloud_filtered);
-// }
+    //orientation_t rotation(0, -eul[1], direction_tmp);
+
+    vector_t plane_normal = rotateVector(eulToR(eul), unit_x);
+
+	plane_t projection_plane = {
+
+		.p = drone_xyz,
+		.normal = plane_normal
+
+	};
+
+	return projection_plane;
+}
+
+
+std::vector<line_model_t> RadarPCLFilter::line_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in)  {
+
+	std::vector<line_model_t> line_models;
+
+	if ( cloud_in->size() < 2 ) {
+		return line_models;
+	}
+
+	
+	std::vector<float> yaw_list;
+
+	static pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients);
+	static pcl::PointIndices::Ptr inliers (new pcl::PointIndices);
+	// Create the segmentation object
+	static pcl::SACSegmentation<pcl::PointXYZ> seg;
+
+	seg.setOptimizeCoefficients (true);
+	seg.setModelType (pcl::SACMODEL_LINE);
+	seg.setMethodType (pcl::SAC_RANSAC);
+	seg.setDistanceThreshold ((float)_model_thresh);
+
+	pcl::PointCloud<pcl::PointXYZ>::Ptr reduced_cloud (new pcl::PointCloud<pcl::PointXYZ>);
+	pcl::ExtractIndices<pcl::PointXYZ> extract;
+
+	pcl::copyPointCloud(*cloud_in, *reduced_cloud);
+
+	seg.setInputCloud (reduced_cloud);
+	seg.segment (*inliers, *coefficients);
+
+
+	line_model_t line_model;
+
+	int count = 0;
+
+	// Continue line extraction if first line model has pitch below threshold and inliers above threshold
+	while (abs(coefficients->values[5]) < 0.25 && inliers->indices.size() > 10)
+	{
+		// scale factor for X and Y to compensate ignoring Z
+		float z_factor = 1 / sqrt( pow(coefficients->values[3],2) + pow(coefficients->values[4],2) );
+		// calculate yaw in world frame (+90 to -90 deg relative to X direction)
+		float tmp_powerline_world_yaw = -1 * (abs(coefficients->values[3]) / coefficients->values[3]) * acos(abs(coefficients->values[3])) * z_factor;
+		
+		// break if difference between current and previous yaw is above 45 degrees (0.7854 rads)
+		if ( count++ > 0 && abs(tmp_powerline_world_yaw - yaw_list.back()) > 0.7854 )
+		{
+			break;
+		}
+
+		yaw_list.push_back(tmp_powerline_world_yaw);
+		
+		_powerline_world_yaw = tmp_powerline_world_yaw;
+		RCLCPP_INFO(this->get_logger(),  "Powerline yaw: %f", (_powerline_world_yaw*DEG_PER_RAD));
+		
+		point_t pl_position(
+			coefficients->values[0],
+			coefficients->values[1], 
+			coefficients->values[2]
+		);
+
+		orientation_t temp_eul(
+			0,
+			0,
+			tmp_powerline_world_yaw
+		);
+
+		quat_t pl_quat = eulToQuat(temp_eul);
+
+		line_model = {
+
+            .position = pl_position,
+            .quaternion = pl_quat
+
+        };
+
+		line_models.push_back(line_model);
+
+		extract.setInputCloud(reduced_cloud);
+
+		extract.setIndices(inliers);
+		extract.setNegative(true);
+		extract.filter(*reduced_cloud); // "The indices size exceeds the size of the input."
+		
+
+		if (reduced_cloud->size() < 1)
+		{
+			break;
+		}
+		
+		seg.setInputCloud (reduced_cloud);
+		seg.segment (*inliers, *coefficients);
+	}		
+
+	auto pose_array_msg = geometry_msgs::msg::PoseArray();
+	pose_array_msg.header = std_msgs::msg::Header();
+	pose_array_msg.header.stamp = this->now();
+	pose_array_msg.header.frame_id = "world";
+
+	for (size_t i = 0; i < line_models.size(); i++)
+	{	
+		auto pose_msg = geometry_msgs::msg::Pose();
+
+		pose_msg.orientation.x = line_models.at(i).quaternion(0);
+		pose_msg.orientation.y = line_models.at(i).quaternion(1);
+		pose_msg.orientation.z = line_models.at(i).quaternion(2);
+		pose_msg.orientation.w = line_models.at(i).quaternion(3);
+		pose_msg.position.x = line_models.at(i).position(0);
+		pose_msg.position.y = line_models.at(i).position(1);
+		pose_msg.position.z = line_models.at(i).position(2);
+
+		pose_array_msg.poses.push_back(pose_msg);
+	}
+
+	direction_array_pub->publish(pose_array_msg);
+
+	return line_models;
+
+}
+
+
 void RadarPCLFilter::direction_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
 											pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered) {
 
@@ -292,42 +457,65 @@ void RadarPCLFilter::direction_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cl
 }
 
 
-// void RadarPCLFilter::concatenate_poincloud(pcl::PointCloud<pcl::PointXYZ>::Ptr new_points) {
-// // concatenates pointclouds until _concat_size is reached then keeps cloud at that size
-// 	this->get_parameter("concat_size", _concat_size);
+void RadarPCLFilter::crop_distant_points(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
+									pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_cropped) {
 
-// 	*_concat_points += *new_points;
+	this->get_parameter("cluster_crop_radius", _cluster_crop_radius);
 
-// 	_concat_history.push_back(new_points->size());
+	float minX = _t_xyz(0) - _cluster_crop_radius;
+	float minY = _t_xyz(1) - _cluster_crop_radius;
 
-// 	if (_concat_history.size() > _concat_size)
-// 	{
-// 		pcl::PointIndices::Ptr inliers(new pcl::PointIndices());
+	float maxX = _t_xyz(0) + _cluster_crop_radius;
+	float maxY = _t_xyz(1) + _cluster_crop_radius;
 
-// 		for (size_t i = 0; i < (size_t)_concat_history.front(); i++)
-// 		{
-// 			inliers->indices.push_back(i);
-// 		}
+	pcl::CropBox<pcl::PointXYZ> boxFilter;
+	boxFilter.setMin(Eigen::Vector4f(minX, minY, -1000, 1.0));
+	boxFilter.setMax(Eigen::Vector4f(maxX, maxY, 1000, 1.0));
+	boxFilter.setInputCloud(cloud_in);
+	boxFilter.filter(*cloud_cropped);
 
-// 		pcl::ExtractIndices<pcl::PointXYZ> extract;
-// 		extract.setInputCloud(_concat_points);
-// 		extract.setIndices(inliers);
-// 		extract.setNegative(true);
-// 		extract.filter(*_concat_points);
+}
 
-// 		_concat_history.pop_front();
-// 	}
-// }
-void RadarPCLFilter::concatenate_poincloud(pcl::PointCloud<pcl::PointXYZ>::Ptr new_points) {
-// Continuously adds new points and downsamples cloud with voxed grid
-	this->get_parameter("leaf_size", _leaf_size);
+
+void RadarPCLFilter::concatenate_poincloud_fixed_size(pcl::PointCloud<pcl::PointXYZ>::Ptr new_points) {
+// concatenates pointclouds until _concat_size is reached then keeps cloud at that size
+	this->get_parameter("concat_size", _concat_size);
 
 	*_concat_points += *new_points;
 
+	_concat_history.push_back(new_points->size());
+
+	if (_concat_history.size() > _concat_size)
+	{
+		pcl::PointIndices::Ptr inliers(new pcl::PointIndices());
+
+		for (size_t i = 0; i < (size_t)_concat_history.front(); i++)
+		{
+			inliers->indices.push_back(i);
+		}
+
+		pcl::ExtractIndices<pcl::PointXYZ> extract;
+		extract.setInputCloud(_concat_points);
+		extract.setIndices(inliers);
+		extract.setNegative(true);
+		extract.filter(*_concat_points);
+
+		_concat_history.pop_front();
+	}
+}
+
+
+void RadarPCLFilter::concatenate_poincloud_downsample(pcl::PointCloud<pcl::PointXYZ>::Ptr new_points,
+														pcl::PointCloud<pcl::PointXYZ>::Ptr concat_points) {
+// Continuously adds new points and downsamples cloud with voxed grid
+	this->get_parameter("leaf_size", _leaf_size);
+
+	*concat_points += *new_points;
+
 	static pcl::VoxelGrid<pcl::PointXYZ> voxel_grid;
-	voxel_grid.setInputCloud (_concat_points);
+	voxel_grid.setInputCloud (concat_points);
 	voxel_grid.setLeafSize ((float)_leaf_size, (float)_leaf_size, (float)_leaf_size);
-	voxel_grid.filter (*_concat_points);
+	voxel_grid.filter (*concat_points);
 }
 
 
@@ -439,12 +627,15 @@ void RadarPCLFilter::transform_pointcloud_to_world(const sensor_msgs::msg::Point
 
 	RCLCPP_INFO(this->get_logger(), "World cloud size: %d", world_points->size());
 
-	RadarPCLFilter::concatenate_poincloud(world_points);
+	RadarPCLFilter::concatenate_poincloud_downsample(world_points, _concat_points);
+
+	RadarPCLFilter::crop_distant_points(_concat_points, _concat_points);
 
 	pcl::PointCloud<pcl::PointXYZ>::Ptr extracted_cloud (new pcl::PointCloud<pcl::PointXYZ>);
-	if (world_points->size() > 1)
+	if (_concat_points->size() > 1)
 	{
-		RadarPCLFilter::direction_extraction(_concat_points, extracted_cloud);
+		// RadarPCLFilter::direction_extraction(_concat_points, extracted_cloud);
+		RadarPCLFilter::line_extraction(_concat_points);
 	}
 	
 
