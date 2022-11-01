@@ -68,7 +68,7 @@ class RadarPCLFilter : public rclcpp::Node
 			this->declare_parameter<float>("leaf_size", 0.75);
 			this->get_parameter("leaf_size", _leaf_size);
 
-			this->declare_parameter<float>("model_thresh", 0.5);
+			this->declare_parameter<float>("model_thresh", 1.0);
 			this->get_parameter("model_thresh", _model_thresh);
 
 			this->declare_parameter<float>("ground_threshold", 5);
@@ -82,6 +82,15 @@ class RadarPCLFilter : public rclcpp::Node
 
 			this->declare_parameter<float>("cluster_crop_radius", 20);
 			this->get_parameter("cluster_crop_radius", _cluster_crop_radius);
+
+			this->declare_parameter<float>("line_model_distance_threshold", 1.5);
+			this->get_parameter("model_thresh", _line_model_distance_thresh);
+
+			this->declare_parameter<float>("line_model_inlier_threshold", 10.0);
+			this->get_parameter("model_thresh", _line_model_inlier_thresh);
+
+			this->declare_parameter<float>("line_model_pitch_threshold", 0.25);
+			this->get_parameter("model_thresh", _line_model_pitch_thresh);
 
 
 			raw_pcl_subscription_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
@@ -164,6 +173,10 @@ class RadarPCLFilter : public rclcpp::Node
 		int _cluster_min_size;
 
 		float _cluster_crop_radius;
+
+		float _line_model_distance_thresh;
+		float _line_model_inlier_thresh;
+		float _line_model_pitch_thresh;
 
 		vector_t _t_xyz;
 
@@ -282,7 +295,10 @@ std::vector<line_model_t> RadarPCLFilter::line_extraction(pcl::PointCloud<pcl::P
 		return line_models;
 	}
 
-	
+	this->get_parameter("line_model_distance_threshold", _line_model_distance_thresh);
+	this->get_parameter("line_model_inlier_threshold", _line_model_inlier_thresh);
+	this->get_parameter("line_model_pitch_threshold", _line_model_pitch_thresh);
+
 	std::vector<float> yaw_list;
 
 	static pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients);
@@ -293,7 +309,7 @@ std::vector<line_model_t> RadarPCLFilter::line_extraction(pcl::PointCloud<pcl::P
 	seg.setOptimizeCoefficients (true);
 	seg.setModelType (pcl::SACMODEL_LINE);
 	seg.setMethodType (pcl::SAC_RANSAC);
-	seg.setDistanceThreshold ((float)_model_thresh);
+	seg.setDistanceThreshold ((float)_line_model_distance_thresh);
 
 	pcl::PointCloud<pcl::PointXYZ>::Ptr reduced_cloud (new pcl::PointCloud<pcl::PointXYZ>);
 	pcl::ExtractIndices<pcl::PointXYZ> extract;
@@ -309,7 +325,8 @@ std::vector<line_model_t> RadarPCLFilter::line_extraction(pcl::PointCloud<pcl::P
 	int count = 0;
 
 	// Continue line extraction if first line model has pitch below threshold and inliers above threshold
-	while (abs(coefficients->values[5]) < 0.25 && inliers->indices.size() > 10)
+	while (abs(coefficients->values[5]) < _line_model_pitch_thresh && 
+			inliers->indices.size() > (int)_line_model_inlier_thresh)
 	{
 		// scale factor for X and Y to compensate ignoring Z
 		float z_factor = 1 / sqrt( pow(coefficients->values[3],2) + pow(coefficients->values[4],2) );
