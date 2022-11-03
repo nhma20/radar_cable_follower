@@ -45,12 +45,6 @@
 #include <pcl/segmentation/extract_clusters.h>
 
 
-// typedef struct {
-// 	point_t position;
-// 	quat_t quaternion;
-// } line_model_t;
-
-
 #define DEG_PER_RAD 57.296
 
 using namespace std::chrono_literals;
@@ -205,8 +199,6 @@ class RadarPCLFilter : public rclcpp::Node
 
 		std::vector<line_model_t> line_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in);									
 
-		plane_t create_plane(quat_t powerline_direction, point_t drone_xyz);
-
 		void create_pointcloud_msg(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, auto * pcl_msg);
 };
 
@@ -263,27 +255,6 @@ void RadarPCLFilter::create_pointcloud_msg(pcl::PointCloud<pcl::PointXYZ>::Ptr c
         ptr += POINT_STEP;
 	}
 	
-}
-
-
-plane_t RadarPCLFilter::create_plane(quat_t powerline_direction, point_t drone_xyz) {
-
-    vector_t unit_x(1, 0, 0);
-
-    orientation_t eul = quatToEul(powerline_direction);
-
-    //orientation_t rotation(0, -eul[1], direction_tmp);
-
-    vector_t plane_normal = rotateVector(eulToR(eul), unit_x);
-
-	plane_t projection_plane = {
-
-		.p = drone_xyz,
-		.normal = plane_normal
-
-	};
-
-	return projection_plane;
 }
 
 
@@ -388,19 +359,42 @@ std::vector<line_model_t> RadarPCLFilter::line_extraction(pcl::PointCloud<pcl::P
 	pose_array_msg.header.stamp = this->now();
 	pose_array_msg.header.frame_id = "world";
 
-	for (size_t i = 0; i < line_models.size(); i++)
-	{	
-		auto pose_msg = geometry_msgs::msg::Pose();
+	// orientation_t pl_eul(
+	// 		0,
+	// 		0,
+	// 		_powerline_world_yaw
+	// 	);
 
-		pose_msg.orientation.x = line_models.at(i).quaternion(0);
-		pose_msg.orientation.y = line_models.at(i).quaternion(1);
-		pose_msg.orientation.z = line_models.at(i).quaternion(2);
-		pose_msg.orientation.w = line_models.at(i).quaternion(3);
-		pose_msg.position.x = line_models.at(i).position(0);
-		pose_msg.position.y = line_models.at(i).position(1);
-		pose_msg.position.z = line_models.at(i).position(2);
+	
+	if (line_models.size() > 0)
+	{
+		plane_t proj_plane = create_plane(line_models.at(0).quaternion, _t_xyz);
 
-		pose_array_msg.poses.push_back(pose_msg);
+		for (size_t i = 0; i < line_models.size(); i++)
+		{	
+
+			point_t pl_point(
+				line_models.at(i).position(0),
+				line_models.at(i).position(1),
+				line_models.at(i).position(2)
+			);
+
+			point_t proj_pl_point = projectPointOnPlane(pl_point, proj_plane);
+
+			RCLCPP_INFO(this->get_logger(),  "Proj point: \n X %f \n Y %f \n Z %f", proj_pl_point(0), proj_pl_point(1), proj_pl_point(2));
+			
+			auto pose_msg = geometry_msgs::msg::Pose();
+
+			pose_msg.orientation.x = line_models.at(i).quaternion(0);
+			pose_msg.orientation.y = line_models.at(i).quaternion(1);
+			pose_msg.orientation.z = line_models.at(i).quaternion(2);
+			pose_msg.orientation.w = line_models.at(i).quaternion(3);
+			pose_msg.position.x = proj_pl_point(0);
+			pose_msg.position.y = proj_pl_point(1);
+			pose_msg.position.z = proj_pl_point(2);
+
+			pose_array_msg.poses.push_back(pose_msg);
+		}
 	}
 
 	direction_array_pub->publish(pose_array_msg);
@@ -495,7 +489,7 @@ void RadarPCLFilter::crop_distant_points(pcl::PointCloud<pcl::PointXYZ>::Ptr clo
 
 
 void RadarPCLFilter::concatenate_poincloud_fixed_size(pcl::PointCloud<pcl::PointXYZ>::Ptr new_points) {
-// concatenates pointclouds until _concat_size is reached then keeps cloud at that size
+// concatenates pointclouds until _concat_size is reached then removes oldest points
 	this->get_parameter("concat_size", _concat_size);
 
 	*_concat_points += *new_points;
@@ -524,7 +518,7 @@ void RadarPCLFilter::concatenate_poincloud_fixed_size(pcl::PointCloud<pcl::Point
 
 void RadarPCLFilter::concatenate_poincloud_downsample(pcl::PointCloud<pcl::PointXYZ>::Ptr new_points,
 														pcl::PointCloud<pcl::PointXYZ>::Ptr concat_points) {
-// Continuously adds new points and downsamples cloud with voxed grid
+// Continuously adds new points and downsamples cloud with voxel grid
 	this->get_parameter("leaf_size", _leaf_size);
 
 	*concat_points += *new_points;

@@ -72,3 +72,5 @@ quat_t matToQuat(rotation_matrix_t R);
 quat_t eulToQuat(orientation_t eul);
 
 transform_t getTransformMatrix(vector_t vec, quat_t quat);
+
+plane_t create_plane(quat_t powerline_direction, point_t drone_xyz);

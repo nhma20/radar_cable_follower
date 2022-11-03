@@ -30,16 +30,25 @@ vector_t rotateVector(rotation_matrix_t R, vector_t v) {
     return ret_vec;
 }
 
+
+
 point_t projectPointOnPlane(point_t point, plane_t plane) {
+//     line_t l = {
+//         .p = point,
+//         .v = plane.normal
+//     };
 
-    line_t l = {
-        .p = point,
-        .v = plane.normal
-    };
+//     float t = - plane.normal.dot(l.p) / plane.normal.dot(plane.normal);
 
-    float t = - plane.normal.dot(l.p) / plane.normal.dot(plane.normal);
+//     point_t proj_point = l.p + (point_t)(t*l.v);
 
-    point_t proj_point = l.p + (point_t)(t*l.v);
+//     return proj_point;
+
+    vector_t diff = point - plane.p;
+
+    float dist = diff.dot(plane.normal);
+
+    point_t proj_point = point - (point_t)(dist*plane.normal);
 
     return proj_point;
 
@@ -135,7 +144,25 @@ transform_t getTransformMatrix(vector_t vec, quat_t quat) {
 }
 
 
+plane_t create_plane(quat_t powerline_direction, point_t drone_xyz) {
 
+    vector_t unit_x(1, 0, 0);
+
+    orientation_t eul = quatToEul(powerline_direction);
+
+    //orientation_t rotation(0, -eul[1], direction_tmp);
+
+    vector_t plane_normal = rotateVector(eulToR(eul), unit_x);
+
+	plane_t projection_plane = {
+
+		.p = drone_xyz,
+		.normal = plane_normal
+
+	};
+
+	return projection_plane;
+}
 
 
 
