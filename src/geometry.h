@@ -48,6 +48,15 @@ typedef struct {
     
 } line_model_t;
 
+typedef struct {
+
+	point_t position;
+	quat_t quaternion;
+    
+} pose_t;
+
+
+
 
 /*****************************************************************************/
 // Function declarations

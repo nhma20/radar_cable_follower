@@ -30,10 +30,16 @@ def generate_launch_description():
         executable="radar_pointcloud_filter"
     )
 
+    offboard_control = Node(
+        package="radar_cable_follower",
+        executable="offboard_control"
+    )
+
 
     return LaunchDescription([
         tf_drone_to_iwr,
         world_to_drone,
         lidar_to_mmwave,
-        radar_pointcloud_filter
+        radar_pointcloud_filter,
+        offboard_control
     ])

@@ -57,7 +57,7 @@ class RadarPCLFilter : public rclcpp::Node
 			
 			// Params
 			this->declare_parameter<int>("concat_size", 200);
-			this->get_parameter("concat_size", _concat_size);
+			 
 
 			this->declare_parameter<float>("leaf_size", 0.75);
 			this->get_parameter("leaf_size", _leaf_size);
@@ -65,7 +65,7 @@ class RadarPCLFilter : public rclcpp::Node
 			this->declare_parameter<float>("model_thresh", 1.0);
 			this->get_parameter("model_thresh", _model_thresh);
 
-			this->declare_parameter<float>("ground_threshold", 5);
+			this->declare_parameter<float>("ground_threshold", 1.5);
 			this->get_parameter("ground_threshold", _ground_threshold);
 
 			this->declare_parameter<float>("cluster_parallelism_threshold", 1.);
@@ -95,12 +95,20 @@ class RadarPCLFilter : public rclcpp::Node
 
 			pl_direction_pub = this->create_publisher<geometry_msgs::msg::PoseStamped>("/powerline_direction", 10);
 
-			direction_array_pub = this->create_publisher<geometry_msgs::msg::PoseArray>("/powerline_direction_array", 10);
+			direction_array_pub = this->create_publisher<geometry_msgs::msg::PoseArray>("/powerline_array", 10);
 
 			tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
 			transform_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
 			geometry_msgs::msg::TransformStamped drone_tf;
+
+			timer_ = this->create_wall_timer(33ms, 
+				std::bind(&RadarPCLFilter::update_powerline_poses, this)); //, std::placeholders::_1
+
+			
+			_timer_tf = this->create_wall_timer(33ms, 
+				std::bind(&RadarPCLFilter::update_tf, this)); //, std::placeholders::_1
+
 
 			while(true) {
 
@@ -139,6 +147,7 @@ class RadarPCLFilter : public rclcpp::Node
   		std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
 
 		rclcpp::TimerBase::SharedPtr timer_;
+		rclcpp::TimerBase::SharedPtr _timer_tf;
 
 		rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr output_pointcloud_pub;
 		rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pl_direction_pub;
@@ -147,36 +156,31 @@ class RadarPCLFilter : public rclcpp::Node
 		rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr raw_pcl_subscription_;
 
 		float _ground_threshold;
-
 		float _height_above_ground = 0;
+		int _concat_size; 
+		float _leaf_size;
+		float _model_thresh;
+		float _cluster_parallelism_threshold;
+		int _cluster_min_size;
+		float _cluster_crop_radius;
+		float _line_model_distance_thresh;
+		float _line_model_inlier_thresh;
+		float _line_model_pitch_thresh;
 
 		int _t_tries = 0;
 
 		bool _first_message = false;
 
-		int _concat_size; 
-
-		float _leaf_size;
-
-		float _model_thresh;
-
 		float _powerline_world_yaw; // +90 to -90 deg relative to x-axis
 
-		float _cluster_parallelism_threshold;
-
-		int _cluster_min_size;
-
-		float _cluster_crop_radius;
-
-		float _line_model_distance_thresh;
-		float _line_model_inlier_thresh;
-		float _line_model_pitch_thresh;
-
 		vector_t _t_xyz;
+		quat_t _t_rot;
 
 		std::deque<int> _concat_history; 
 
 		pcl::PointCloud<pcl::PointXYZ>::Ptr _concat_points;
+
+		std::vector<line_model_t> _line_models;
 
 		void transform_pointcloud_to_world(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
 
@@ -200,8 +204,87 @@ class RadarPCLFilter : public rclcpp::Node
 		std::vector<line_model_t> line_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in);									
 
 		void create_pointcloud_msg(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, auto * pcl_msg);
+
+		void update_powerline_poses();
+
+		void update_tf();
 };
 
+
+void RadarPCLFilter::update_tf() {
+
+	geometry_msgs::msg::TransformStamped t;
+
+	try {
+		if (tf_buffer_->canTransform("world", "iwr6843_frame", tf2::TimePointZero))	{
+			t = tf_buffer_->lookupTransform("world","iwr6843_frame",tf2::TimePointZero);
+		}
+		else {
+			RCLCPP_INFO(this->get_logger(), "Can not transform");
+			return;
+		}
+	} catch (const tf2::TransformException & ex) {
+		RCLCPP_INFO(this->get_logger(), "Could not transform: %s", ex.what());
+		return;
+	}
+
+
+	_t_xyz(0) = t.transform.translation.x;
+	_t_xyz(1) = t.transform.translation.y;
+	_t_xyz(2) = t.transform.translation.z;
+
+	_t_rot(0) = t.transform.rotation.x;
+	_t_rot(1) = t.transform.rotation.y;
+	_t_rot(2) = t.transform.rotation.z;
+	_t_rot(3) = t.transform.rotation.w;
+
+}
+
+
+void RadarPCLFilter::update_powerline_poses() {
+
+	if (_line_models.size() > 0)
+	{
+
+		auto pose_array_msg = geometry_msgs::msg::PoseArray();
+		pose_array_msg.header = std_msgs::msg::Header();
+		pose_array_msg.header.stamp = this->now();
+		pose_array_msg.header.frame_id = "world";
+		
+		plane_t proj_plane = create_plane(_line_models.at(0).quaternion, _t_xyz);
+
+		for (size_t i = 0; i < _line_models.size(); i++)
+		{	
+
+			point_t pl_point(
+				_line_models.at(i).position(0),
+				_line_models.at(i).position(1),
+				_line_models.at(i).position(2)
+			);
+
+			point_t proj_pl_point = projectPointOnPlane(pl_point, proj_plane);
+
+			// RCLCPP_INFO(this->get_logger(),  "Proj point: \n X %f \n Y %f \n Z %f", proj_pl_point(0), proj_pl_point(1), proj_pl_point(2));
+			
+			auto pose_msg = geometry_msgs::msg::Pose();
+
+			pose_msg.orientation.x = _line_models.at(i).quaternion(0);
+			pose_msg.orientation.y = _line_models.at(i).quaternion(1);
+			pose_msg.orientation.z = _line_models.at(i).quaternion(2);
+			pose_msg.orientation.w = _line_models.at(i).quaternion(3);
+			pose_msg.position.x = proj_pl_point(0);
+			pose_msg.position.y = proj_pl_point(1);
+			pose_msg.position.z = proj_pl_point(2);
+
+			pose_array_msg.poses.push_back(pose_msg);
+		}
+
+		direction_array_pub->publish(pose_array_msg);
+
+	}
+
+
+}
 
 
 void RadarPCLFilter::create_pointcloud_msg(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, auto * pcl_msg) {
@@ -313,7 +396,7 @@ std::vector<line_model_t> RadarPCLFilter::line_extraction(pcl::PointCloud<pcl::P
 		yaw_list.push_back(tmp_powerline_world_yaw);
 		
 		_powerline_world_yaw = tmp_powerline_world_yaw;
-		RCLCPP_INFO(this->get_logger(),  "Powerline yaw: %f", (_powerline_world_yaw*DEG_PER_RAD));
+		// RCLCPP_INFO(this->get_logger(),  "Powerline yaw: %f", (_powerline_world_yaw*DEG_PER_RAD));
 		
 		point_t pl_position(
 			coefficients->values[0],
@@ -342,10 +425,10 @@ std::vector<line_model_t> RadarPCLFilter::line_extraction(pcl::PointCloud<pcl::P
 
 		extract.setIndices(inliers);
 		extract.setNegative(true);
-		extract.filter(*reduced_cloud); // "The indices size exceeds the size of the input."
+		extract.filter(*reduced_cloud); 
 		
 
-		if (reduced_cloud->size() < 1)
+		if (reduced_cloud->size() < (int)_line_model_inlier_thresh)
 		{
 			break;
 		}
@@ -354,50 +437,6 @@ std::vector<line_model_t> RadarPCLFilter::line_extraction(pcl::PointCloud<pcl::P
 		seg.segment (*inliers, *coefficients);
 	}		
 
-	auto pose_array_msg = geometry_msgs::msg::PoseArray();
-	pose_array_msg.header = std_msgs::msg::Header();
-	pose_array_msg.header.stamp = this->now();
-	pose_array_msg.header.frame_id = "world";
-
-	// orientation_t pl_eul(
-	// 		0,
-	// 		0,
-	// 		_powerline_world_yaw
-	// 	);
-
-	
-	if (line_models.size() > 0)
-	{
-		plane_t proj_plane = create_plane(line_models.at(0).quaternion, _t_xyz);
-
-		for (size_t i = 0; i < line_models.size(); i++)
-		{	
-
-			point_t pl_point(
-				line_models.at(i).position(0),
-				line_models.at(i).position(1),
-				line_models.at(i).position(2)
-			);
-
-			point_t proj_pl_point = projectPointOnPlane(pl_point, proj_plane);
-
-			RCLCPP_INFO(this->get_logger(),  "Proj point: \n X %f \n Y %f \n Z %f", proj_pl_point(0), proj_pl_point(1), proj_pl_point(2));
-			
-			auto pose_msg = geometry_msgs::msg::Pose();
-
-			pose_msg.orientation.x = line_models.at(i).quaternion(0);
-			pose_msg.orientation.y = line_models.at(i).quaternion(1);
-			pose_msg.orientation.z = line_models.at(i).quaternion(2);
-			pose_msg.orientation.w = line_models.at(i).quaternion(3);
-			pose_msg.position.x = proj_pl_point(0);
-			pose_msg.position.y = proj_pl_point(1);
-			pose_msg.position.z = proj_pl_point(2);
-
-			pose_array_msg.poses.push_back(pose_msg);
-		}
-	}
-
-	direction_array_pub->publish(pose_array_msg);
 
 	return line_models;
 
@@ -583,37 +622,13 @@ void RadarPCLFilter::transform_pointcloud_to_world(const sensor_msgs::msg::Point
 		return;
 	}
 
-	geometry_msgs::msg::TransformStamped t;
-
-	try {
-		if (tf_buffer_->canTransform("world", "iwr6843_frame", tf2::TimePointZero))	{
-			t = tf_buffer_->lookupTransform("world","iwr6843_frame",tf2::TimePointZero);
-		}
-		else {
-			RCLCPP_INFO(this->get_logger(), "Can not transform");
-			return;
-		}
-	} catch (const tf2::TransformException & ex) {
-		RCLCPP_INFO(this->get_logger(), "Could not transform: %s", ex.what());
-		return;
-	}
-
 
 	// make transform drone->world
 
-	_height_above_ground = t.transform.translation.z;
+	_height_above_ground = _t_xyz(2); ///t.transform.translation.z;
 
-	_t_xyz(0) = t.transform.translation.x;
-	_t_xyz(1) = t.transform.translation.y;
-	_t_xyz(2) = t.transform.translation.z;
 
-	quat_t t_rot;
-	t_rot(0) = t.transform.rotation.x;
-	t_rot(1) = t.transform.rotation.y;
-	t_rot(2) = t.transform.rotation.z;
-	t_rot(3) = t.transform.rotation.w;
-
-	homog_transform_t world_to_drone = getTransformMatrix(_t_xyz, t_rot);
+	homog_transform_t world_to_drone = getTransformMatrix(_t_xyz, _t_rot);
 
 	// transform points in pointcloud
 
@@ -636,7 +651,7 @@ void RadarPCLFilter::transform_pointcloud_to_world(const sensor_msgs::msg::Point
 
 	// publish transformed pointcloud
 
-	RCLCPP_INFO(this->get_logger(), "World cloud size: %d", world_points->size());
+	// RCLCPP_INFO(this->get_logger(), "World cloud size: %d", world_points->size());
 
 	RadarPCLFilter::concatenate_poincloud_downsample(world_points, _concat_points);
 
@@ -646,7 +661,7 @@ void RadarPCLFilter::transform_pointcloud_to_world(const sensor_msgs::msg::Point
 	if (_concat_points->size() > 1)
 	{
 		// RadarPCLFilter::direction_extraction(_concat_points, extracted_cloud);
-		RadarPCLFilter::line_extraction(_concat_points);
+		_line_models = RadarPCLFilter::line_extraction(_concat_points);
 	}
 	
 

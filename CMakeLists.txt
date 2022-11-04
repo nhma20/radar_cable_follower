@@ -56,20 +56,18 @@ ament_target_dependencies(drone_frame_broadcaster
 install(TARGETS drone_frame_broadcaster DESTINATION lib/${PROJECT_NAME})
 
 
-# add_executable(radar_pointcloud_filter
-#   src/radar_pointcloud_filter.cpp
-#   src/geometry.cpp
-# )
-# ament_target_dependencies(radar_pointcloud_filter
-#   rclcpp
-#   sensor_msgs
-#   px4_msgs
-#   tf2
-#   tf2_ros
-#   tf2_msgs
-#   PCL
-# )
-# install(TARGETS radar_pointcloud_filter DESTINATION lib/${PROJECT_NAME})
+add_executable(offboard_control
+  src/offboard_control.cpp
+  src/geometry.cpp
+)
+ament_target_dependencies(offboard_control
+  rclcpp
+  Eigen3
+  geometry_msgs
+  px4_msgs
+)
+install(TARGETS offboard_control DESTINATION lib/${PROJECT_NAME})
+
 
 add_executable(radar_pointcloud_filter
   src/radar_pointcloud_filter.cpp
