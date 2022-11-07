@@ -578,7 +578,7 @@ void RadarPCLFilter::filter_pointcloud(float ground_threshold, float drone_thres
 
 	for (size_t i = 0; i < (size_t)pcl_size; i++)
 	{
-		if ( ( cloud->at(i).z > ground_threshold )  && ( cloud->at(i).z < (_height_above_ground-drone_threshold) ) )
+		if (  ( cloud->at(i).z > (_height_above_ground+drone_threshold) ) )
 		{
 			inliers->indices.push_back(i);
 		}
@@ -642,7 +642,7 @@ void RadarPCLFilter::transform_pointcloud_to_world(const sensor_msgs::msg::Point
 
 	// filter ground and drone points 
 	this->get_parameter("ground_threshold", _ground_threshold);
-	RadarPCLFilter::filter_pointcloud(_ground_threshold, 0.2, world_points);
+	RadarPCLFilter::filter_pointcloud(_ground_threshold, 0.5, world_points);
 
 	if (world_points->size() < 1)
 	{

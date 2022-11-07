@@ -70,9 +70,9 @@ private:
         t.child_frame_id = drone_frame_id_;
 
         point_t position(
-            msg->position[0],
-            msg->position[1], 
-            msg->position[2]
+            msg->x,
+            msg->y, 
+            msg->z
         );
 
         position = R_NED_to_body_frame * position;
