@@ -10,6 +10,8 @@
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/buffer.h>
 #include <tf2/exceptions.h>
+#include <sensor_msgs/msg/image.hpp>
+#include "cv_bridge/cv_bridge.h"
 #include "geometry.h"
 
  // MISC includes
@@ -44,8 +46,12 @@
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/segmentation/extract_clusters.h>
 
+#include "opencv2/imgcodecs.hpp"
+#include "opencv2/highgui.hpp"
+#include "opencv2/imgproc.hpp"
 
 #define DEG_PER_RAD 57.296
+#define PI 3.14159265
 
 using namespace std::chrono_literals;
 
@@ -96,6 +102,8 @@ class RadarPCLFilter : public rclcpp::Node
 			pl_direction_pub = this->create_publisher<geometry_msgs::msg::PoseStamped>("/powerline_direction", 10);
 
 			direction_array_pub = this->create_publisher<geometry_msgs::msg::PoseArray>("/powerline_array", 10);
+
+			hough_line_pub = this->create_publisher<sensor_msgs::msg::Image>("/hough_line_img", 10);
 
 			tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
 			transform_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -152,6 +160,7 @@ class RadarPCLFilter : public rclcpp::Node
 		rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr output_pointcloud_pub;
 		rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pl_direction_pub;
 		rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr direction_array_pub;
+		rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr hough_line_pub;
 
 		rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr raw_pcl_subscription_;
 
@@ -200,6 +209,8 @@ class RadarPCLFilter : public rclcpp::Node
 
 		void direction_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
 									pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered);
+
+		float direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in);
 
 		std::vector<line_model_t> line_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in);									
 
@@ -507,6 +518,54 @@ void RadarPCLFilter::direction_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cl
 }
 
 
+float RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in) {
+
+	int img_size = _cluster_crop_radius*10*2;
+	cv::Mat img(img_size, img_size, CV_8UC1, cv::Scalar(0));
+
+	for (size_t i = 0; i < cloud_in->size(); i++)
+	{
+		pcl::PointXYZ point = (*cloud_in)[i];
+
+		float x_tmp = roundf( img_size/2 + 10.0*(point.x - _t_xyz(0)) );
+		float y_tmp = roundf( img_size/2 + 10.0*(point.y - _t_xyz(1)) );
+
+		// img.at<uchar>(x_tmp, y_tmp) = 255;
+		cv::circle(img, cv::Point(x_tmp,y_tmp),1, cv::Scalar(255,255,255), -1, 8,0);
+
+	}
+
+	// // Standard Hough Line Transform
+    // std::vector<cv::Vec2f> lines; // will hold the results of the detection
+    // cv::HoughLines(img, lines, 1, PI/180, 150, 0, 0 ); // runs the actual detection
+
+	// Probabilistic Line Transform
+    std::vector<cv::Vec4i> linesP; // will hold the results of the detection
+	// 
+    cv::HoughLinesP(img, linesP, 1, PI/180, 35, 35, 30 ); // rho res pixels, theta res rads, min intersections, min line length, max line gap
+    // Draw the lines
+    for( size_t i = 0; i < linesP.size(); i++ )
+    {
+        cv::Vec4i l = linesP[i];
+        cv::line( img, cv::Point(l[0], l[1]), cv::Point(l[2], l[3]), cv::Scalar(127,127,127), 3, cv::LINE_AA);
+		// break;
+    }
+	
+	// static int name_counter = 0;
+	// std::string filename = std::to_string(name_counter++);
+	// std::string extension = ".jpg";
+	// filename = filename + extension;
+	// std::string path = "/home/nm/uzh_ws/ros2_ws/test_folder/";
+	// cv::imwrite( (path+filename), img );
+
+
+	sensor_msgs::msg::Image::SharedPtr msg = cv_bridge::CvImage(std_msgs::msg::Header(), "mono8", img).toImageMsg();
+
+	hough_line_pub->publish(*msg.get()); //
+
+}
+
+
 void RadarPCLFilter::crop_distant_points(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
 									pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_cropped) {
 
@@ -672,6 +731,8 @@ void RadarPCLFilter::transform_pointcloud_to_world(const sensor_msgs::msg::Point
 	auto pcl_msg = sensor_msgs::msg::PointCloud2();
 	RadarPCLFilter::create_pointcloud_msg(_concat_points, &pcl_msg);
 	output_pointcloud_pub->publish(pcl_msg);  
+
+	RadarPCLFilter::direction_extraction_2D(_concat_points);
 
 }
 
