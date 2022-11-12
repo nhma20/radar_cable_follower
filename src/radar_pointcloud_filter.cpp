@@ -10,6 +10,8 @@
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/buffer.h>
 #include <tf2/exceptions.h>
+#include <sensor_msgs/msg/image.hpp>
+#include "cv_bridge/cv_bridge.h"
 #include "geometry.h"
 
  // MISC includes
@@ -48,6 +50,7 @@
 #include "opencv2/imgcodecs.hpp"
 #include "opencv2/highgui.hpp"
 #include "opencv2/imgproc.hpp"
+// #include "opencv2/core/hal/interface.hpp"
 
 
 #define DEG_PER_RAD 57.296
@@ -106,6 +109,8 @@ class RadarPCLFilter : public rclcpp::Node
 
 			direction_array_pub = this->create_publisher<geometry_msgs::msg::PoseArray>("/powerline_array", 10);
 
+			hough_line_pub = this->create_publisher<sensor_msgs::msg::Image>("/hough_line_img", 10);
+
 			tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
 			transform_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
@@ -161,6 +166,7 @@ class RadarPCLFilter : public rclcpp::Node
 		rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr output_pointcloud_pub;
 		rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pl_direction_pub;
 		rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr direction_array_pub;
+		rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr hough_line_pub;
 
 		rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr raw_pcl_subscription_;
 
@@ -553,12 +559,17 @@ float RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Pt
 		// break;
     }
 	
-	static int name_counter = 0;
-	std::string filename = std::to_string(name_counter++);
-	std::string extension = ".jpg";
-	filename = filename + extension;
-	std::string path = "/home/nm/uzh_ws/ros2_ws/src/radar_cable_follower/testing/";
-	cv::imwrite( (path+filename), img );
+	// static int name_counter = 0;
+	// std::string filename = std::to_string(name_counter++);
+	// std::string extension = ".jpg";
+	// filename = filename + extension;
+	// std::string path = "/home/nm/uzh_ws/ros2_ws/test_folder/";
+	// cv::imwrite( (path+filename), img );
+
+
+	sensor_msgs::msg::Image::SharedPtr msg = cv_bridge::CvImage(std_msgs::msg::Header(), "mono8", img).toImageMsg();
+
+	hough_line_pub->publish(*msg.get()); //
 
 }
 
