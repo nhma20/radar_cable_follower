@@ -535,8 +535,9 @@ float RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Pt
 	{
 		pcl::PointXYZ point = (*cloud_in)[i];
 
-		float x_tmp = roundf( img_size/2 + 10.0*(point.x - _t_xyz(0)) );
-		float y_tmp = roundf( img_size/2 + 10.0*(point.y - _t_xyz(1)) );
+		// x and y swapped to align image with world x y (up = +x, left = +y)
+		float y_tmp = roundf( img_size/2 - 10.0*(point.x - _t_xyz(0)) );
+		float x_tmp = roundf( img_size/2 - 10.0*(point.y - _t_xyz(1)) );
 
 		// img.at<uchar>(x_tmp, y_tmp) = 255;
 		cv::circle(img, cv::Point(x_tmp,y_tmp),1, cv::Scalar(255,255,255), -1, 8,0);
@@ -552,19 +553,41 @@ float RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Pt
 	// 
     cv::HoughLinesP(img, linesP, 1, PI/180, 35, 35, 30 ); // rho res pixels, theta res rads, min intersections, min line length, max line gap
     // Draw the lines
+	float tmp_pl_world_yaw = -0.0;
     for( size_t i = 0; i < linesP.size(); i++ )
     {
         cv::Vec4i l = linesP[i];
         cv::line( img, cv::Point(l[0], l[1]), cv::Point(l[2], l[3]), cv::Scalar(127,127,127), 3, cv::LINE_AA);
 		// break;
-    }
+		RCLCPP_INFO(this->get_logger(),  "Points \n XY: %f %f \n XY: %f %f \n", (float)l[0], (float)l[1], (float)l[2], (float)l[3]);
+		
+		float diff_x = (float)l[0] - (float)l[2];
+		float diff_y = (float)l[1] - (float)l[3];
+		float ratio = diff_y / diff_x;
+
+		tmp_pl_world_yaw = (abs(ratio) / ratio) * acos(abs(ratio));
+
+		RCLCPP_INFO(this->get_logger(),  "Angle: %f\n", (tmp_pl_world_yaw*DEG_PER_RAD));
+	}
+
+	std::string txt_angle = std::to_string((int)roundf(tmp_pl_world_yaw*DEG_PER_RAD));
 	
+	cv::putText(img, //target image
+            txt_angle, //text
+            cv::Point((img.cols / 2)-15, img.rows-25), //top-left position
+            cv::FONT_HERSHEY_DUPLEX,
+            1.0,
+            cv::Scalar(255,255,255), //font color
+            2);
+
 	// static int name_counter = 0;
 	// std::string filename = std::to_string(name_counter++);
 	// std::string extension = ".jpg";
 	// filename = filename + extension;
 	// std::string path = "/home/nm/uzh_ws/ros2_ws/test_folder/";
 	// cv::imwrite( (path+filename), img );
+
+	
 
 
 	sensor_msgs::msg::Image::SharedPtr msg = cv_bridge::CvImage(std_msgs::msg::Header(), "mono8", img).toImageMsg();
