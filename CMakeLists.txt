@@ -84,6 +84,8 @@ ament_target_dependencies(radar_pointcloud_filter
   tf2_ros
   tf2_msgs
   PCL
+  cv_bridge
+  OpenCV
 )
 install(TARGETS radar_pointcloud_filter DESTINATION lib/${PROJECT_NAME})
 
