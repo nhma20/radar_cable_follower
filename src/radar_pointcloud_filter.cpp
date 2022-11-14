@@ -218,7 +218,8 @@ class RadarPCLFilter : public rclcpp::Node
 		void direction_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
 									pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered);
 
-		float direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in);
+		float direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
+										Eigen::Vector3f &dir_axis);
 
 		std::vector<line_model_t> line_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in);									
 
@@ -526,7 +527,8 @@ void RadarPCLFilter::direction_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cl
 }
 
 
-float RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in) {
+float RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in, 
+												Eigen::Vector3f &dir_axis) {
 
 	int img_size = _cluster_crop_radius*10*2;
 	cv::Mat img(img_size, img_size, CV_8UC1, cv::Scalar(0));
@@ -559,7 +561,7 @@ float RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Pt
         cv::Vec4i l = linesP[i];
         cv::line( img, cv::Point(l[0], l[1]), cv::Point(l[2], l[3]), cv::Scalar(127,127,127), 3, cv::LINE_AA);
 		// break;
-		RCLCPP_INFO(this->get_logger(),  "Points \n XY: %f %f \n XY: %f %f \n", (float)l[0], (float)l[1], (float)l[2], (float)l[3]);
+		// RCLCPP_INFO(this->get_logger(),  "Points \n XY: %f %f \n XY: %f %f \n", (float)l[0], (float)l[1], (float)l[2], (float)l[3]);
 		
 		float diff_x = (float)l[0] - (float)l[2];
 		float diff_y = (float)l[1] - (float)l[3];
@@ -567,7 +569,7 @@ float RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Pt
 
 		tmp_pl_world_yaw = (abs(ratio) / ratio) * acos(abs(ratio));
 
-		RCLCPP_INFO(this->get_logger(),  "Angle: %f\n", (tmp_pl_world_yaw*DEG_PER_RAD));
+		// RCLCPP_INFO(this->get_logger(),  "Angle: %f\n", (tmp_pl_world_yaw*DEG_PER_RAD));
 	}
 
 	std::string txt_angle = std::to_string((int)roundf(tmp_pl_world_yaw*DEG_PER_RAD));
@@ -587,12 +589,13 @@ float RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Pt
 	// std::string path = "/home/nm/uzh_ws/ros2_ws/test_folder/";
 	// cv::imwrite( (path+filename), img );
 
-	
-
+	dir_axis(0) = cos(tmp_pl_world_yaw);
+	dir_axis(1) = sin(tmp_pl_world_yaw);
+	dir_axis(2) = 0;
 
 	sensor_msgs::msg::Image::SharedPtr msg = cv_bridge::CvImage(std_msgs::msg::Header(), "mono8", img).toImageMsg();
 
-	hough_line_pub->publish(*msg.get()); //
+	hough_line_pub->publish(*msg.get());
 
 }
 
@@ -758,6 +761,11 @@ void RadarPCLFilter::transform_pointcloud_to_world(const sensor_msgs::msg::Point
 
 	RadarPCLFilter::crop_distant_points(_concat_points, _concat_points);
 
+	Eigen::Vector3f dir_axis;
+	RadarPCLFilter::direction_extraction_2D(_concat_points, dir_axis);
+
+	RCLCPP_INFO(this->get_logger(),  "Axis: \n X %f\n Y %f\n Z %f\n", dir_axis(0), dir_axis(1), dir_axis(2));
+
 	pcl::PointCloud<pcl::PointXYZ>::Ptr extracted_cloud (new pcl::PointCloud<pcl::PointXYZ>);
 	if (_concat_points->size() > 1)
 	{
@@ -773,9 +781,6 @@ void RadarPCLFilter::transform_pointcloud_to_world(const sensor_msgs::msg::Point
 	auto pcl_msg = sensor_msgs::msg::PointCloud2();
 	RadarPCLFilter::create_pointcloud_msg(_concat_points, &pcl_msg);
 	output_pointcloud_pub->publish(pcl_msg);  
-
-
-	RadarPCLFilter::direction_extraction_2D(_concat_points);
 
 }
 
