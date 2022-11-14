@@ -307,8 +307,8 @@ void OffboardControl::update_alignment_pose(geometry_msgs::msg::PoseArray::Share
 		_alignment_pose.quaternion(2) = msg->poses[highest_index].orientation.z;
 		_alignment_pose.quaternion(3) = msg->poses[highest_index].orientation.w;
 
-		RCLCPP_INFO(this->get_logger(), "Alignment pose:\n X %f \n Y: %f \n Z: %f",
-			_alignment_pose.position(0), _alignment_pose.position(1), _alignment_pose.position(2));		
+		// RCLCPP_INFO(this->get_logger(), "Alignment pose:\n X %f \n Y: %f \n Z: %f",
+		// 	_alignment_pose.position(0), _alignment_pose.position(1), _alignment_pose.position(2));		
 
 
 	} _powerline_mutex.unlock();
