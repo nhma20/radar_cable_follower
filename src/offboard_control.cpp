@@ -83,9 +83,9 @@ public:
 		_vehicle_command_publisher =
 			this->create_publisher<px4_msgs::msg::VehicleCommand>("fmu/vehicle_command/in", 10);
 
-		this->declare_parameter<float>("yaw_frac", 0.1);
+		this->declare_parameter<float>("yaw_frac", 0.05);
 		this->declare_parameter<float>("pos_frac", 0.5);
-		this->declare_parameter<float>("powerline_following_distance", 5.0);
+		this->declare_parameter<float>("powerline_following_distance", 10.0);
 
 
 		// VehicleStatus: https://github.com/PX4/px4_msgs/blob/master/msg/VehicleStatus.msg
@@ -112,7 +112,7 @@ public:
 				} _drone_pose_mutex.unlock();		  
 			});
 
-		_follow_point_pub = this->create_publisher<geometry_msgs::msg::PointStamped>("follow_point", 10);
+		_follow_pose_pub = this->create_publisher<geometry_msgs::msg::PoseStamped>("/follow_pose", 10);
 
 
 		// get common timestamp
@@ -146,7 +146,7 @@ private:
 	rclcpp::Publisher<px4_msgs::msg::OffboardControlMode>::SharedPtr _offboard_control_mode_publisher;
 	rclcpp::Publisher<px4_msgs::msg::TrajectorySetpoint>::SharedPtr _trajectory_setpoint_publisher;
 	rclcpp::Publisher<px4_msgs::msg::VehicleCommand>::SharedPtr _vehicle_command_publisher;
-	rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr _follow_point_pub;
+	rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr _follow_pose_pub;
 
 	rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr _powerline_pose_sub;
 	rclcpp::Subscription<px4_msgs::msg::Timesync>::SharedPtr _timesync_sub;
@@ -178,6 +178,7 @@ private:
 	void publish_hover_setpoint() const;
 	void publish_tracking_setpoint();
 	void publish_hold_setpoint() const;
+	void publish_setpoint(px4_msgs::msg::TrajectorySetpoint msg) const;
 	void publish_vehicle_command(uint16_t command, float param1 = 0.0,
 				     float param2 = 0.0) const;
 	void world_to_points();
@@ -244,6 +245,12 @@ void OffboardControl::flight_state_machine() {
 		publish_offboard_control_mode();
 		publish_tracking_setpoint();
 
+		RCLCPP_INFO(this->get_logger(), "Alignment pose:\n X %f \n Y: %f \n Z: %f",
+			_alignment_pose.position(0), _alignment_pose.position(1), _alignment_pose.position(2));	
+			
+		RCLCPP_INFO(this->get_logger(), "Drone pose:\n X %f \n Y: %f \n Z: %f",		
+			_drone_pose.position(0), _drone_pose.position(1), _drone_pose.position(2));	
+
 	}
 
 	_counter++;
@@ -264,7 +271,7 @@ void OffboardControl::update_drone_pose(px4_msgs::msg::VehicleOdometry::SharedPt
 		_drone_pose.quaternion(2) = msg->q[2];
 		_drone_pose.quaternion(3) = msg->q[3];
 
-		_drone_orientation = quatToEul(_drone_pose.quaternion);
+		_drone_orientation = quatToEul(_drone_pose.quaternion); // Yaw Pitch Roll ?
 
 	} _drone_pose_mutex.unlock();
 
@@ -295,7 +302,7 @@ void OffboardControl::update_alignment_pose(geometry_msgs::msg::PoseArray::Share
 
 	_powerline_mutex.lock(); {	
 
-		_alignment_pose.position(0) = msg->poses[highest_index].position.x; // crashes here?
+		_alignment_pose.position(0) = msg->poses[highest_index].position.x;
 		_alignment_pose.position(1) = msg->poses[highest_index].position.y;
 		_alignment_pose.position(2) = msg->poses[highest_index].position.z + (float)_following_distance;
 
@@ -308,14 +315,6 @@ void OffboardControl::update_alignment_pose(geometry_msgs::msg::PoseArray::Share
 		// 	_alignment_pose.position(0), _alignment_pose.position(1), _alignment_pose.position(2));		
 
 	} _powerline_mutex.unlock();
-
-	geometry_msgs::msg::PointStamped point_msg;
-	point_msg.header.frame_id = "world";
-	point_msg.header.stamp = this->get_clock()->now();
-	point_msg.point.x = _alignment_pose.position(0);
-	point_msg.point.y = _alignment_pose.position(1);
-	point_msg.point.z = _alignment_pose.position(2) + (float)_following_distance;
-	_follow_point_pub->publish(point_msg);
 
 }
 
@@ -371,16 +370,40 @@ void OffboardControl::publish_tracking_setpoint() {
 	float x_frac;
 	float y_frac;
 	float z_frac;
+	float target_yaw;
 
 	_powerline_mutex.lock(); {
 	_drone_pose_mutex.lock(); {
 
 		// minus to convert to NED
 		x_frac = _drone_pose.position(0) + (_alignment_pose.position(0) - _drone_pose.position(0))*pos_frac;
-		y_frac = (_drone_pose.position(1) + (_alignment_pose.position(1) - _drone_pose.position(1))*pos_frac);
-		z_frac = (_drone_pose.position(2) + (_alignment_pose.position(2) - _drone_pose.position(2))*pos_frac);
+		y_frac = _drone_pose.position(1) + (_alignment_pose.position(1) - _drone_pose.position(1))*pos_frac;
+		z_frac = _drone_pose.position(2) + (_alignment_pose.position(2) - _drone_pose.position(2))*pos_frac;
 		
 		target_yaw_eul = quatToEul(_alignment_pose.quaternion);
+		float cur_yaw = ( (float)_drone_orientation(0) + ( abs((float)_drone_orientation(1)) - PI ) ) - (float)PI/2;
+		target_yaw = target_yaw_eul(2);
+		
+		if ( abs(cur_yaw - target_yaw) <= (float)PI )
+		{
+			target_yaw = cur_yaw + (target_yaw - cur_yaw)*yaw_frac;			
+		}
+		else 
+		{
+			;//target_yaw = cur_yaw - (target_yaw - cur_yaw)*yaw_frac;
+		}
+
+		// if (target_yaw > 2*PI)
+		// {
+		// 	target_yaw = target_yaw - 2*PI;
+		// }
+		// RCLCPP_INFO(this->get_logger(), "Current yaw:%f", cur_yaw);
+		// RCLCPP_INFO(this->get_logger(), "Target yaw:%f", target_yaw);
+
+		// float cur_yaw = ( -(float)_drone_orientation(0) + ( abs((float)_drone_orientation(1)) - PI ) );
+		// target_yaw = cur_yaw + (target_yaw_eul(2) - cur_yaw)*yaw_frac;
+
+		// drone_yaw_-yaw_frac*pl_yaw_;
 
 
 	} _drone_pose_mutex.unlock();
@@ -398,17 +421,17 @@ void OffboardControl::publish_tracking_setpoint() {
 
 	px4_msgs::msg::TrajectorySetpoint msg{};
 	msg.timestamp = _timestamp.load();
-	msg.position[0] = _alignment_pose.position(0); //x_frac; // in meters NED
-	msg.position[1] = - _alignment_pose.position(1); //y_frac; // in meters NED
-	msg.position[2] = - ( _alignment_pose.position(2) + 5 ); //z_frac; // in meters NED
-	msg.yaw = -(float)target_yaw_eul(2);//_drone_orientation(2)-yaw_frac*target_yaw_eul(2); // rotation around z in radians
-	// msg.velocity[0] =   unit_velocity(0); // m/s NED
-	// msg.velocity[1] = - unit_velocity(1); // m/s NED
-	// msg.velocity[2] = - unit_velocity(2); // m/s NED
+	msg.position[0] =   _alignment_pose.position(0); // in meters NED
+	msg.position[1] = - _alignment_pose.position(1); // in meters NED
+	msg.position[2] = - _alignment_pose.position(2); // in meters NED
+	msg.yaw = -(float)target_yaw_eul(2); // rotation around z in radians
+	msg.velocity[0] =   unit_velocity(0); // m/s NED
+	msg.velocity[1] = - unit_velocity(1); // m/s NED
+	msg.velocity[2] = - unit_velocity(2); // m/s NED
 
-	// RCLCPP_INFO(this->get_logger(), "X:%f Y:%f Z:%f YAW:%f", msg.x, msg.y, msg.z, msg.yaw);
+	// RCLCPP_INFO(this->get_logger(), "Xv:%f Yv:%f Zv:%f", msg.velocity[0], msg.velocity[1], msg.velocity[2]);
 
-	_trajectory_setpoint_publisher->publish(msg);
+	OffboardControl::publish_setpoint(msg);
 }
 
 
@@ -423,15 +446,16 @@ void OffboardControl::publish_hover_setpoint() const {
 	msg.position[0] = _drone_pose.position(0); 		// in meters NED
 	msg.position[1] = - _drone_pose.position(1);
 	msg.position[2] = - _hover_height;
-	msg.yaw = _drone_orientation(2);
+	// YAW is cropped to 0-PI for some reason, uncrop to 0-2PI based on if ROLL is 0 or PI
+	msg.yaw = -(float)_drone_orientation(0) + ( abs((float)_drone_orientation(1)) - PI );
 
-	_trajectory_setpoint_publisher->publish(msg);
+	OffboardControl::publish_setpoint(msg);
 }
 
 
 /**
  * @brief Publish a trajectory setpoint
- *        Drone should hover in place
+ *        Drone should holds it pose
  */
 void OffboardControl::publish_hold_setpoint() const {
 
@@ -440,7 +464,41 @@ void OffboardControl::publish_hold_setpoint() const {
 	msg.position[0] = _drone_pose.position(0); 		// in meters NED
 	msg.position[1] = _drone_pose.position(1);
 	msg.position[2] = _drone_pose.position(2);
-	msg.yaw = _drone_orientation(2);
+	//YPR; YAW is cropped to 0-PI for some reason, uncrop to 0-2PI based on if ROLL is 0 or PI
+	msg.yaw = -(float)_drone_orientation(0) + ( abs((float)_drone_orientation(1)) - PI );
+
+	// RCLCPP_INFO(this->get_logger(), "DRONE EUL:\n R:%f P:%f Y:%f ", _drone_orientation(0), _drone_orientation(1), _drone_orientation(2));
+
+	OffboardControl::publish_setpoint(msg);
+}
+
+
+/**
+ * @brief Publish a trajectory setpoint
+ * and pose message
+ */
+void OffboardControl::publish_setpoint(px4_msgs::msg::TrajectorySetpoint msg) const {
+
+	orientation_t eul (
+		0.0,
+		0.0,
+		-msg.yaw
+	);
+
+	quat_t quat = eulToQuat(eul);
+
+	auto pose_msg = geometry_msgs::msg::PoseStamped();
+	pose_msg.header.stamp = this->now();
+	pose_msg.header.frame_id = "world";
+	pose_msg.pose.orientation.x = quat(0);
+	pose_msg.pose.orientation.y = quat(1);
+	pose_msg.pose.orientation.z = quat(2);
+	pose_msg.pose.orientation.w = quat(3);
+	pose_msg.pose.position.x = msg.position[0];
+	pose_msg.pose.position.y = -msg.position[1];
+	pose_msg.pose.position.z = -msg.position[2];
+
+	_follow_pose_pub->publish(pose_msg);
 
 	_trajectory_setpoint_publisher->publish(msg);
 }
