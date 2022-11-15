@@ -85,7 +85,7 @@ public:
 
 		this->declare_parameter<float>("yaw_frac", 0.1);
 		this->declare_parameter<float>("pos_frac", 0.5);
-		this->declare_parameter<float>("powerline_following_distance", 10.0);
+		this->declare_parameter<float>("powerline_following_distance", 5.0);
 
 
 		// VehicleStatus: https://github.com/PX4/px4_msgs/blob/master/msg/VehicleStatus.msg
@@ -96,9 +96,6 @@ public:
               _nav_state = msg->nav_state;
 			});
 
-
-		// _powerline_pose_sub = this->create_subscription<geometry_msgs::msg::PoseArray>(
-        //     "/powerline_array", 10, std::bind(&OffboardControl::update_alignment_pose, this, std::placeholders::_1));
 
 
 		_powerline_pose_sub = this->create_subscription<geometry_msgs::msg::PoseArray>(
@@ -221,27 +218,27 @@ void OffboardControl::flight_state_machine() {
 		this->arm();
 	}
 
-	if(_counter < 20){
-		if(_counter == 0){
-			RCLCPP_INFO(this->get_logger(), "Waiting two seconds \n");
-		}
-		publish_offboard_control_mode();
-		publish_hold_setpoint();
-	}
+	// if(_counter < 20){
+	// 	if(_counter == 0){
+	// 		RCLCPP_INFO(this->get_logger(), "Waiting two seconds \n");
+	// 	}
+	// 	publish_offboard_control_mode();
+	// 	publish_hold_setpoint();
+	// }
 
-	else if(_counter < 100){
+	// else if(_counter < 100){
 
-		_counter = 100;
-		if(_counter == 21){
-			RCLCPP_INFO(this->get_logger(), "Holding position \n");
-		}
-		publish_offboard_control_mode();
-		publish_hold_setpoint();
+	// 	_counter = 100;
+	// 	if(_counter == 21){
+	// 		RCLCPP_INFO(this->get_logger(), "Holding position \n");
+	// 	}
+	// 	publish_offboard_control_mode();
+	// 	publish_hold_setpoint();
 		
-	}
+	// }
 
-	else if(_counter >= 100){
-		if(_counter == 101){
+	else if(_counter < 1000000){
+		if(_counter == 10){
 			RCLCPP_INFO(this->get_logger(), "Beginning alignment \n");
 		}
 		publish_offboard_control_mode();
@@ -288,15 +285,15 @@ void OffboardControl::update_alignment_pose(geometry_msgs::msg::PoseArray::Share
 	for (size_t i = 0; i < msg->poses.size(); i++)
 	{
 		if ( msg->poses[i].position.z > current_highest ){
-			current_highest = msg->poses[0].position.z;
+			current_highest = msg->poses[i].position.z;
 			highest_index = i;
 		}
 	}
 
-	_powerline_mutex.lock(); {
+	float _following_distance;
+	this->get_parameter("powerline_following_distance", _following_distance);	
 
-		float _following_distance;
-		this->get_parameter("powerline_following_distance", _following_distance);		
+	_powerline_mutex.lock(); {	
 
 		_alignment_pose.position(0) = msg->poses[highest_index].position.x; // crashes here?
 		_alignment_pose.position(1) = msg->poses[highest_index].position.y;
@@ -310,8 +307,15 @@ void OffboardControl::update_alignment_pose(geometry_msgs::msg::PoseArray::Share
 		// RCLCPP_INFO(this->get_logger(), "Alignment pose:\n X %f \n Y: %f \n Z: %f",
 		// 	_alignment_pose.position(0), _alignment_pose.position(1), _alignment_pose.position(2));		
 
-
 	} _powerline_mutex.unlock();
+
+	geometry_msgs::msg::PointStamped point_msg;
+	point_msg.header.frame_id = "world";
+	point_msg.header.stamp = this->get_clock()->now();
+	point_msg.point.x = _alignment_pose.position(0);
+	point_msg.point.y = _alignment_pose.position(1);
+	point_msg.point.z = _alignment_pose.position(2) + (float)_following_distance;
+	_follow_point_pub->publish(point_msg);
 
 }
 
@@ -397,7 +401,7 @@ void OffboardControl::publish_tracking_setpoint() {
 	msg.position[0] = _alignment_pose.position(0); //x_frac; // in meters NED
 	msg.position[1] = - _alignment_pose.position(1); //y_frac; // in meters NED
 	msg.position[2] = - ( _alignment_pose.position(2) + 5 ); //z_frac; // in meters NED
-	// msg.yaw = _drone_orientation(2)-yaw_frac*target_yaw_eul(2); // rotation around z in radians
+	msg.yaw = -(float)target_yaw_eul(2);//_drone_orientation(2)-yaw_frac*target_yaw_eul(2); // rotation around z in radians
 	// msg.velocity[0] =   unit_velocity(0); // m/s NED
 	// msg.velocity[1] = - unit_velocity(1); // m/s NED
 	// msg.velocity[2] = - unit_velocity(2); // m/s NED
@@ -433,9 +437,9 @@ void OffboardControl::publish_hold_setpoint() const {
 
 	px4_msgs::msg::TrajectorySetpoint msg{};
 	msg.timestamp = _timestamp.load();
-	msg.position[0] = 5;//_drone_pose.position(0); 		// in meters NED
-	msg.position[1] = 5;//- _drone_pose.position(1);
-	msg.position[2] = -15;// _drone_pose.position(2);
+	msg.position[0] = _drone_pose.position(0); 		// in meters NED
+	msg.position[1] = _drone_pose.position(1);
+	msg.position[2] = _drone_pose.position(2);
 	msg.yaw = _drone_orientation(2);
 
 	_trajectory_setpoint_publisher->publish(msg);

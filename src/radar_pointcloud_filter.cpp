@@ -770,7 +770,7 @@ float RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Pt
 		{
 			// average cluster with most votes
 			float count = (float)clusters.at(biggest_cluster_idx).size();
-			float sum;
+			float sum = 0.0;
 
 			for (size_t i = 0; i < clusters.at(biggest_cluster_idx).size(); i++)
 			{
@@ -778,11 +778,14 @@ float RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Pt
 			}
 
 			powerline_2d_angle = sum / count;
+
+
+			// RCLCPP_INFO(this->get_logger(),  "Sum %f:", sum);
+			// RCLCPP_INFO(this->get_logger(),  "Count %f:", count);
 		}
 		
 	}
-	
-	RCLCPP_INFO(this->get_logger(),  "Angle %f:", powerline_2d_angle);
+	// RCLCPP_INFO(this->get_logger(),  "Angle %f:", powerline_2d_angle);
 
 	std::string txt_angle = std::to_string((int)roundf(powerline_2d_angle*DEG_PER_RAD));
 	
