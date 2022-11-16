@@ -88,6 +88,7 @@ public:
 		this->declare_parameter<float>("yaw_frac", 0.25);
 		this->declare_parameter<float>("pos_frac", 0.5);
 		this->declare_parameter<float>("powerline_following_distance", 10.0);
+		this->declare_parameter<float>("powerline_following_speed", 1.0);
 
 
 		// VehicleStatus: https://github.com/PX4/px4_msgs/blob/master/msg/VehicleStatus.msg
@@ -194,13 +195,13 @@ void OffboardControl::flight_state_machine() {
 		if (_old_nav_state != _nav_state && _nav_state != 14)
 		{				
 			RCLCPP_INFO(this->get_logger(), "nav_state: %d", _nav_state);
-			RCLCPP_INFO(this->get_logger(), "Waiting for offboard mode");
+			RCLCPP_INFO(this->get_logger(), "\n \nWaiting for offboard mode\n");
 		}
 
 		if (_old_nav_state != _nav_state && _nav_state == 14)
 		{				
 			RCLCPP_INFO(this->get_logger(), "nav_state: %d", _nav_state);
-			RCLCPP_INFO(this->get_logger(), "Offboard mode enabled");
+			RCLCPP_INFO(this->get_logger(), "\n \nOffboard mode enabled\n");
 		}
 
 		publish_offboard_control_mode();
@@ -238,7 +239,7 @@ void OffboardControl::flight_state_machine() {
 
 	else if(_counter < 1000000){
 		if(_counter == 10){
-			RCLCPP_INFO(this->get_logger(), "Beginning alignment \n");
+			RCLCPP_INFO(this->get_logger(), "\n \nBeginning alignment \n");
 		}
 		publish_offboard_control_mode();
 		publish_tracking_setpoint();
@@ -379,6 +380,9 @@ void OffboardControl::publish_tracking_setpoint() {
 	float yaw_frac;
 	this->get_parameter("yaw_frac", yaw_frac);
 
+	float follow_speed;
+	this->get_parameter("powerline_following_speed", follow_speed);
+
 	orientation_t target_yaw_eul;
 
 	pose_eul_t publish_pose;
@@ -417,7 +421,7 @@ void OffboardControl::publish_tracking_setpoint() {
 	} _powerline_mutex.unlock();
 
 	point_t unit_x(
-		1.0,
+		1.0 * follow_speed,
 		0.0,
 		0.0
 	);
