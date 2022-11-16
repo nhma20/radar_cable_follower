@@ -380,30 +380,17 @@ void OffboardControl::publish_tracking_setpoint() {
 	this->get_parameter("yaw_frac", yaw_frac);
 
 	orientation_t target_yaw_eul;
-	// float x_frac;
-	// float y_frac;
-	// float z_frac;
-	// float target_yaw;
 
 	pose_eul_t publish_pose;
 
 	_powerline_mutex.lock(); {
 	_drone_pose_mutex.lock(); {
-
-		// minus to convert to NED
-		publish_pose.position(0) = _drone_pose.position(0) + (_alignment_pose.position(0) - _drone_pose.position(0))*pos_frac;
-		publish_pose.position(1) = _drone_pose.position(1) + (_alignment_pose.position(1) - _drone_pose.position(1))*pos_frac;
-		publish_pose.position(2) = _drone_pose.position(2) + (_alignment_pose.position(2) - _drone_pose.position(2))*pos_frac;
 		
+		// calculate fractional yaw positions (basic porportional control)
 		target_yaw_eul = quatToEul(_alignment_pose.quaternion);
 
-		// publish_pose.orientation(0) = 0.0;
-		// publish_pose.orientation(1) = 0.0;
-		// publish_pose.orientation(2) = target_yaw_eul(2);
-
-
-		float cur_yaw = 2*M_PI + quatToEul(_drone_pose.quaternion)(2); //( -(float)_drone_orientation(0) + ( abs((float)_drone_orientation(1)) - PI ) );
-		float target_yaw = 2*M_PI + target_yaw_eul(2);
+		float cur_yaw = quatToEul(_drone_pose.quaternion)(2); 
+		float target_yaw = target_yaw_eul(2);
 		
 		if ( abs(cur_yaw - target_yaw) <= (float)M_PI )
 		{
@@ -411,18 +398,15 @@ void OffboardControl::publish_tracking_setpoint() {
 		}
 		else 
 		{
-			target_yaw = cur_yaw - (target_yaw - cur_yaw)*yaw_frac;
+			float diff = (2*M_PI - target_yaw) + cur_yaw;
+
+			target_yaw = cur_yaw - diff*yaw_frac;			
 		}
 
-		// if (target_yaw > 2*PI)
-		// {
-		// 	target_yaw = target_yaw - 2*PI;
-		// }
-		RCLCPP_INFO(this->get_logger(), "Current yaw:%f", cur_yaw);
-		RCLCPP_INFO(this->get_logger(), "Target yaw:%f", target_yaw);
-		
-		// target_yaw = cur_yaw + (target_yaw_eul(2) - cur_yaw)*yaw_frac;
 
+		publish_pose.position(0) = _drone_pose.position(0) + (_alignment_pose.position(0) - _drone_pose.position(0))*pos_frac;
+		publish_pose.position(1) = _drone_pose.position(1) + (_alignment_pose.position(1) - _drone_pose.position(1))*pos_frac;
+		publish_pose.position(2) = _drone_pose.position(2) + (_alignment_pose.position(2) - _drone_pose.position(2))*pos_frac;		
 
 		publish_pose.orientation(0) = 0.0;
 		publish_pose.orientation(1) = 0.0;
