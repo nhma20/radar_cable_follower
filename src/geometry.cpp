@@ -99,10 +99,14 @@ quat_t quatInv(quat_t quat) {
 quat_t quatMultiply(quat_t quat1, quat_t quat2) {
 
     quat_t ret_quat(
-        quat1[0]*quat2[0] - quat1[1]*quat2[1] - quat1[2]*quat2[2] - quat1[3]*quat2[3],
-        quat1[0]*quat2[1] + quat1[1]*quat2[0] + quat1[2]*quat2[3] - quat1[3]*quat2[2],
-        quat1[0]*quat2[2] - quat1[1]*quat2[3] + quat1[2]*quat2[0] + quat1[3]*quat2[1],
-        quat1[0]*quat2[3] + quat1[1]*quat2[2] - quat1[2]*quat2[1] + quat1[3]*quat2[0]
+        // quat1[0]*quat2[0] - quat1[1]*quat2[1] - quat1[2]*quat2[2] - quat1[3]*quat2[3],
+        // quat1[0]*quat2[1] + quat1[1]*quat2[0] + quat1[2]*quat2[3] - quat1[3]*quat2[2],
+        // quat1[0]*quat2[2] - quat1[1]*quat2[3] + quat1[2]*quat2[0] + quat1[3]*quat2[1],
+        // quat1[0]*quat2[3] + quat1[1]*quat2[2] - quat1[2]*quat2[1] + quat1[3]*quat2[0]
+         quat1[0] * quat2[3] + quat1[1] * quat2[2] - quat1[2] * quat2[1] + quat1[3] * quat2[0],
+        -quat1[0] * quat2[2] + quat1[1] * quat2[3] + quat1[2] * quat2[0] + quat1[3] * quat2[1],
+         quat1[0] * quat2[1] - quat1[1] * quat2[0] + quat1[2] * quat2[3] + quat1[3] * quat2[2],
+        -quat1[0] * quat2[0] - quat1[1] * quat2[1] - quat1[2] * quat2[2] + quat1[3] * quat2[3]
     );
 
     return ret_quat;
@@ -197,17 +201,17 @@ plane_t create_plane(quat_t powerline_direction, point_t drone_xyz) {
 }
 
 
-pose_eul_t pose_ENU_to_NED(pose_eul_t ENU_pose) {
+pose_eul_t pose_NWU_to_NED(pose_eul_t NWU_pose) {
 
-    static rotation_matrix_t R_ENU_to_NED = eulToR(orientation_t(-M_PI, 0, 0));
+    static rotation_matrix_t R_NWU_to_NED = eulToR(orientation_t(-M_PI, 0, 0));
 
     pose_eul_t NED_pose;
 
-    NED_pose.position = R_ENU_to_NED * ENU_pose.position;
+    NED_pose.position = R_NWU_to_NED * NWU_pose.position;
 
-    NED_pose.orientation(0) = ENU_pose.orientation(0); 
-    NED_pose.orientation(1) = -ENU_pose.orientation(1);         // Dirty hack
-    NED_pose.orientation(2) = -ENU_pose.orientation(2);
+    NED_pose.orientation(0) = NWU_pose.orientation(0); 
+    NED_pose.orientation(1) = -NWU_pose.orientation(1);         // Dirty hack
+    NED_pose.orientation(2) = -NWU_pose.orientation(2);
 
     return NED_pose;
 }

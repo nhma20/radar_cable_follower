@@ -85,7 +85,7 @@ public:
 		_vehicle_command_publisher =
 			this->create_publisher<px4_msgs::msg::VehicleCommand>("fmu/vehicle_command/in", 10);
 
-		this->declare_parameter<float>("yaw_frac", 0.05);
+		this->declare_parameter<float>("yaw_frac", 0.25);
 		this->declare_parameter<float>("pos_frac", 0.5);
 		this->declare_parameter<float>("powerline_following_distance", 10.0);
 
@@ -243,11 +243,11 @@ void OffboardControl::flight_state_machine() {
 		publish_offboard_control_mode();
 		publish_tracking_setpoint();
 
-		RCLCPP_INFO(this->get_logger(), "Alignment pose:\n X %f \n Y: %f \n Z: %f",
-			_alignment_pose.position(0), _alignment_pose.position(1), _alignment_pose.position(2));	
+		// RCLCPP_INFO(this->get_logger(), "Alignment pose:\n X %f \n Y: %f \n Z: %f",
+		// 	_alignment_pose.position(0), _alignment_pose.position(1), _alignment_pose.position(2));	
 			
-		RCLCPP_INFO(this->get_logger(), "Drone pose:\n X %f \n Y: %f \n Z: %f",		
-			_drone_pose.position(0), _drone_pose.position(1), _drone_pose.position(2));	
+		// RCLCPP_INFO(this->get_logger(), "Drone pose:\n X %f \n Y: %f \n Z: %f",		
+		// 	_drone_pose.position(0), _drone_pose.position(1), _drone_pose.position(2));	
 
 	}
 
@@ -275,18 +275,6 @@ void OffboardControl::update_drone_pose() {
 
 	_drone_pose_mutex.lock(); {
 
-		// _drone_pose.position(0) = msg->position[0];
-		// _drone_pose.position(1) = msg->position[1];
-		// _drone_pose.position(2) = msg->position[2];
-
-		// _drone_pose.quaternion(0) = msg->q[0];
-		// _drone_pose.quaternion(1) = msg->q[1];
-		// _drone_pose.quaternion(2) = msg->q[2];
-		// _drone_pose.quaternion(3) = msg->q[3];
-
-		// _drone_orientation = quatToEul(_drone_pose.quaternion); // Yaw Pitch Roll ?
-
-
 		_drone_pose.position(0) = t.transform.translation.x;
 		_drone_pose.position(1) = t.transform.translation.y;
 		_drone_pose.position(2) = t.transform.translation.z;
@@ -295,8 +283,6 @@ void OffboardControl::update_drone_pose() {
 		_drone_pose.quaternion(1) = t.transform.rotation.y;
 		_drone_pose.quaternion(2) = t.transform.rotation.z;
 		_drone_pose.quaternion(3) = t.transform.rotation.w;
-
-		// _drone_orientation = quatToEul(_drone_pose.quaternion);
 
 		// RCLCPP_INFO(this->get_logger(), "Yaw: %f", _drone_orientation(2));
 
@@ -410,36 +396,37 @@ void OffboardControl::publish_tracking_setpoint() {
 		publish_pose.position(2) = _drone_pose.position(2) + (_alignment_pose.position(2) - _drone_pose.position(2))*pos_frac;
 		
 		target_yaw_eul = quatToEul(_alignment_pose.quaternion);
-		// float cur_yaw = ( (float)_drone_orientation(0) + ( abs((float)_drone_orientation(1)) - PI ) ) - (float)PI/2;
 
-		publish_pose.orientation(0) = 0.0;
-		publish_pose.orientation(1) = 0.0;
-		publish_pose.orientation(2) = target_yaw_eul(2);
+		// publish_pose.orientation(0) = 0.0;
+		// publish_pose.orientation(1) = 0.0;
+		// publish_pose.orientation(2) = target_yaw_eul(2);
 
 
+		float cur_yaw = 2*M_PI + quatToEul(_drone_pose.quaternion)(2); //( -(float)_drone_orientation(0) + ( abs((float)_drone_orientation(1)) - PI ) );
+		float target_yaw = 2*M_PI + target_yaw_eul(2);
 		
-		// target_yaw = target_yaw_eul(2);
-		
-		// if ( abs(cur_yaw - target_yaw) <= (float)PI )
-		// {
-		// 	target_yaw = cur_yaw + (target_yaw - cur_yaw)*yaw_frac;			
-		// }
-		// else 
-		// {
-		// 	;//target_yaw = cur_yaw - (target_yaw - cur_yaw)*yaw_frac;
-		// }
+		if ( abs(cur_yaw - target_yaw) <= (float)M_PI )
+		{
+			target_yaw = cur_yaw + (target_yaw - cur_yaw)*yaw_frac;			
+		}
+		else 
+		{
+			target_yaw = cur_yaw - (target_yaw - cur_yaw)*yaw_frac;
+		}
 
 		// if (target_yaw > 2*PI)
 		// {
 		// 	target_yaw = target_yaw - 2*PI;
 		// }
-		// RCLCPP_INFO(this->get_logger(), "Current yaw:%f", cur_yaw);
-		// RCLCPP_INFO(this->get_logger(), "Target yaw:%f", target_yaw);
-
-		// float cur_yaw = ( -(float)_drone_orientation(0) + ( abs((float)_drone_orientation(1)) - PI ) );
+		RCLCPP_INFO(this->get_logger(), "Current yaw:%f", cur_yaw);
+		RCLCPP_INFO(this->get_logger(), "Target yaw:%f", target_yaw);
+		
 		// target_yaw = cur_yaw + (target_yaw_eul(2) - cur_yaw)*yaw_frac;
 
-		// drone_yaw_-yaw_frac*pl_yaw_;
+
+		publish_pose.orientation(0) = 0.0;
+		publish_pose.orientation(1) = 0.0;
+		publish_pose.orientation(2) = target_yaw;
 
 
 	} _drone_pose_mutex.unlock();
@@ -452,15 +439,15 @@ void OffboardControl::publish_tracking_setpoint() {
 	);
 
 
-	publish_pose = pose_ENU_to_NED(publish_pose);
+	publish_pose = pose_NWU_to_NED(publish_pose);
 	
 	// rotate unit x (1,0,0) velocity to align with powerline direction
 	rotation_matrix_t rot_mat = quatToMat(_alignment_pose.quaternion);
 	point_t unit_velocity = rotateVector(rot_mat, unit_x);
 
-	// rotate powerline direction velocity from ENU to NED frame
-	static rotation_matrix_t R_ENU_to_NED = eulToR(orientation_t(-M_PI, 0, 0));
-	unit_velocity = rotateVector(R_ENU_to_NED, unit_velocity);
+	// rotate powerline direction velocity from NWU to NED frame
+	static rotation_matrix_t R_NWU_to_NED = eulToR(orientation_t(-M_PI, 0, 0));
+	unit_velocity = rotateVector(R_NWU_to_NED, unit_velocity);
 
 	px4_msgs::msg::TrajectorySetpoint msg{};
 	msg.timestamp = _timestamp.load();
@@ -502,21 +489,21 @@ void OffboardControl::publish_hover_setpoint() const {
  */
 void OffboardControl::publish_hold_setpoint() const {
 
-	pose_eul_t ENU_to_NED_pose;
-	ENU_to_NED_pose.position = _drone_pose.position; 
-	ENU_to_NED_pose.orientation = quatToEul(_drone_pose.quaternion);	
+	pose_eul_t NWU_to_NED_pose;
+	NWU_to_NED_pose.position = _drone_pose.position; 
+	NWU_to_NED_pose.orientation = quatToEul(_drone_pose.quaternion);	
 
-	ENU_to_NED_pose = pose_ENU_to_NED(ENU_to_NED_pose);
+	NWU_to_NED_pose = pose_NWU_to_NED(NWU_to_NED_pose);
 
 	px4_msgs::msg::TrajectorySetpoint msg{}; // in meters NED
 	msg.timestamp = _timestamp.load();
-	msg.position[0] = ENU_to_NED_pose.position(0); 		
-	msg.position[1] = ENU_to_NED_pose.position(1);
-	msg.position[2] = ENU_to_NED_pose.position(2);
+	msg.position[0] = NWU_to_NED_pose.position(0); 		
+	msg.position[1] = NWU_to_NED_pose.position(1);
+	msg.position[2] = NWU_to_NED_pose.position(2);
 	//YAW is cropped to 0-PI for some reason, uncrop to 0-2PI based on if ROLL is 0 or PI
-	msg.yaw = (float)ENU_to_NED_pose.orientation(2);// + (float)ENU_to_NED_pose.orientation(0);
+	msg.yaw = (float)NWU_to_NED_pose.orientation(2);// + (float)NWU_to_NED_pose.orientation(0);
 
-	RCLCPP_INFO(this->get_logger(), "DRONE EUL:\n R:%f P:%f Y:%f ", ENU_to_NED_pose.orientation(0), ENU_to_NED_pose.orientation(1), ENU_to_NED_pose.orientation(2));
+	// RCLCPP_INFO(this->get_logger(), "DRONE EUL:\n R:%f P:%f Y:%f ", NWU_to_NED_pose.orientation(0), NWU_to_NED_pose.orientation(1), NWU_to_NED_pose.orientation(2));
 
 	OffboardControl::publish_setpoint(msg);
 }
@@ -531,7 +518,7 @@ void OffboardControl::publish_setpoint(px4_msgs::msg::TrajectorySetpoint msg) co
 	orientation_t eul (
 		0.0,
 		0.0,
-		-msg.yaw // NED to ENU
+		-msg.yaw // NED to NWU
 	);
 
 	quat_t quat = eulToQuat(eul);
@@ -544,8 +531,8 @@ void OffboardControl::publish_setpoint(px4_msgs::msg::TrajectorySetpoint msg) co
 	pose_msg.pose.orientation.z = quat(2);
 	pose_msg.pose.orientation.w = quat(3);
 	pose_msg.pose.position.x = msg.position[0];
-	pose_msg.pose.position.y = -msg.position[1]; // NED to ENU
-	pose_msg.pose.position.z = -msg.position[2]; // NED to ENU
+	pose_msg.pose.position.y = -msg.position[1]; // NED to NWU
+	pose_msg.pose.position.z = -msg.position[2]; // NED to NWU
 
 	_follow_pose_pub->publish(pose_msg);
 
