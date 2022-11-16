@@ -39,6 +39,7 @@
 #include <pcl/filters/extract_indices.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/crop_box.h>
+#include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/features/normal_3d.h>
 #include <pcl/search/kdtree.h>
 #include <pcl/sample_consensus/method_types.h>
@@ -99,6 +100,12 @@ class RadarPCLFilter : public rclcpp::Node
 
 			this->declare_parameter<std::string>("voxel_or_time_concat", "voxel");
 			this->get_parameter("voxel_or_time_concat", _voxel_or_time_concat);
+
+			this->declare_parameter<std::string>("line_or_point_follow", "line");
+			this->get_parameter("line_or_point_follow", _line_or_point_follow);
+
+			this->declare_parameter<int>("point_follow_outlier_filter", 0);
+			this->get_parameter("point_follow_outlier_filter", _point_follow_outlier_filter);
 
 
 			raw_pcl_subscription_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
@@ -177,6 +184,8 @@ class RadarPCLFilter : public rclcpp::Node
 		float _height_above_ground = 0;
 		int _concat_size; 
 		std::string _voxel_or_time_concat;
+		std::string _line_or_point_follow;
+		int _point_follow_outlier_filter;
 		float _leaf_size;
 		float _model_thresh;
 		float _cluster_crop_radius;
@@ -220,13 +229,16 @@ class RadarPCLFilter : public rclcpp::Node
 		void direction_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
 									pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered);
 
-		float direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
+		void direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
 										Eigen::Vector3f &dir_axis);
 
 		std::vector<line_model_t> line_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in);		
 
 		std::vector<line_model_t> parallel_line_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
-																	Eigen::Vector3f axis);							
+																	Eigen::Vector3f axis);
+
+		std::vector<line_model_t> follow_point_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
+																	Eigen::Vector3f axis);																						
 
 		void create_pointcloud_msg(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, auto * pcl_msg);
 
@@ -590,6 +602,65 @@ std::vector<line_model_t> RadarPCLFilter::parallel_line_extraction(pcl::PointClo
 
 }
 
+std::vector<line_model_t> RadarPCLFilter::follow_point_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
+																	Eigen::Vector3f axis) {
+	
+	if (cloud_in->size() > 50)
+	{
+		this->get_parameter("point_follow_outlier_filter", _point_follow_outlier_filter);
+
+		if (_point_follow_outlier_filter > 0)
+		{
+		
+			// filter cloud for outliers
+			pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
+			sor.setInputCloud (cloud_in);
+			sor.setMeanK (5); // param this
+			sor.setStddevMulThresh (6.0); // and this?
+			sor.filter (*cloud_in);
+
+		}
+
+		// find highest point
+		pcl::PointXYZ max_z_point;
+		for (size_t i = 0; i < cloud_in->size (); ++i)
+		{
+			// Check if the point is invalid
+			if (!std::isfinite ((*cloud_in)[i].x) || 
+				!std::isfinite ((*cloud_in)[i].y) || 
+				!std::isfinite ((*cloud_in)[i].z))
+				continue;
+
+			if ((*cloud_in)[i].z > max_z_point.z) {
+				max_z_point = (*cloud_in)[i];
+			}
+		}
+
+	// create line model from hough angle and highest point XYZ
+	orientation_t hough_angle (
+		0,
+		0,
+		acos(axis(0))
+	);
+
+	std::vector<line_model_t> line_model_vec;
+	line_model_t line_model;
+
+	line_model.position(0) = max_z_point.x;
+	line_model.position(1) = max_z_point.y;
+	line_model.position(2) = max_z_point.z;
+
+	line_model.quaternion = eulToQuat(hough_angle);
+
+	line_model_vec.push_back(line_model);
+
+	_line_models = line_model_vec;
+
+	}
+
+	return _line_models; // only update if new data
+
+}
 
 void RadarPCLFilter::direction_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
 											pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered) {
@@ -646,7 +717,7 @@ void RadarPCLFilter::direction_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cl
 }
 
 
-float RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in, 
+void RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in, 
 												Eigen::Vector3f &dir_axis) {
 
 	int img_size = _cluster_crop_radius*10*2;
@@ -985,9 +1056,23 @@ void RadarPCLFilter::transform_pointcloud_to_world(const sensor_msgs::msg::Point
 	pcl::PointCloud<pcl::PointXYZ>::Ptr extracted_cloud (new pcl::PointCloud<pcl::PointXYZ>);
 	if (_concat_points->size() > 1)
 	{
+		this->get_parameter("line_or_point_follow", _line_or_point_follow);
 		// RadarPCLFilter::direction_extraction(_concat_points, extracted_cloud);
 		// _line_models = RadarPCLFilter::line_extraction(_concat_points);
-		_line_models = RadarPCLFilter::parallel_line_extraction(_concat_points, dir_axis);
+		if (_line_or_point_follow == "line")
+		{
+			_line_models = RadarPCLFilter::parallel_line_extraction(_concat_points, dir_axis);
+		}
+		else if (_line_or_point_follow == "point")
+		{
+			_line_models = RadarPCLFilter::follow_point_extraction(_concat_points, dir_axis);
+		}
+		else 
+		{
+			RCLCPP_INFO(this->get_logger(), "Invalid follow method: %s", _line_or_point_follow);
+		}
+		
+			
 	}
 	
 
