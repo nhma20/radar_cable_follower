@@ -65,6 +65,9 @@ ament_target_dependencies(offboard_control
   Eigen3
   geometry_msgs
   px4_msgs
+  tf2
+  tf2_ros
+  tf2_msgs
 )
 install(TARGETS offboard_control DESTINATION lib/${PROJECT_NAME})
 
@@ -83,9 +86,9 @@ ament_target_dependencies(radar_pointcloud_filter
   tf2
   tf2_ros
   tf2_msgs
-  PCL
-  cv_bridge
   OpenCV
+  cv_bridge
+  PCL
 )
 install(TARGETS radar_pointcloud_filter DESTINATION lib/${PROJECT_NAME})
 
