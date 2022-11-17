@@ -54,13 +54,35 @@ point_t projectPointOnPlane(point_t point, plane_t plane) {
 
 orientation_t quatToEul(quat_t quat) {
 
-    Eigen::Quaternionf q;
-    q.x() = quat[0];
-    q.y() = quat[1];
-    q.z() = quat[2];
-    q.w() = quat[3];
+    // Eigen::Quaternionf q;
+    // q.x() = quat[0];
+    // q.y() = quat[1];
+    // q.z() = quat[2];
+    // q.w() = quat[3];
 
-    orientation_t eul  = q.toRotationMatrix().eulerAngles(0, 1, 2);
+    // orientation_t eul  = q.toRotationMatrix().eulerAngles(0, 1, 2);
+
+    // thanks wikipedia
+    // https://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles#Quaternion_to_Euler_angles_conversion
+    orientation_t eul;
+
+    // roll (x-axis rotation)
+    double sinr_cosp = 2 * (quat[3] * quat[0] + quat[1] * quat[2]);
+    double cosr_cosp = 1 - 2 * (quat[0] * quat[0] + quat[1] * quat[1]);
+    eul(0) = std::atan2(sinr_cosp, cosr_cosp);
+
+    // pitch (y-axis rotation)
+    double sinp = 2 * (quat[3] * quat[1] - quat[2] * quat[0]);
+    if (std::abs(sinp) >= 1)
+        eul(1) = std::copysign(M_PI / 2, sinp); // use 90 degrees if out of range
+    else
+        eul(1) = std::asin(sinp);
+
+    // yaw (z-axis rotation)
+    double siny_cosp = 2 * (quat[3] * quat[2] + quat[0] * quat[1]);
+    double cosy_cosp = 1 - 2 * (quat[1] * quat[1] + quat[2] * quat[2]);
+    eul(2) = std::atan2(siny_cosp, cosy_cosp);
+
 
     return eul;
 
@@ -77,10 +99,14 @@ quat_t quatInv(quat_t quat) {
 quat_t quatMultiply(quat_t quat1, quat_t quat2) {
 
     quat_t ret_quat(
-        quat1[0]*quat2[0] - quat1[1]*quat2[1] - quat1[2]*quat2[2] - quat1[3]*quat2[3],
-        quat1[0]*quat2[1] + quat1[1]*quat2[0] + quat1[2]*quat2[3] - quat1[3]*quat2[2],
-        quat1[0]*quat2[2] - quat1[1]*quat2[3] + quat1[2]*quat2[0] + quat1[3]*quat2[1],
-        quat1[0]*quat2[3] + quat1[1]*quat2[2] - quat1[2]*quat2[1] + quat1[3]*quat2[0]
+        // quat1[0]*quat2[0] - quat1[1]*quat2[1] - quat1[2]*quat2[2] - quat1[3]*quat2[3],
+        // quat1[0]*quat2[1] + quat1[1]*quat2[0] + quat1[2]*quat2[3] - quat1[3]*quat2[2],
+        // quat1[0]*quat2[2] - quat1[1]*quat2[3] + quat1[2]*quat2[0] + quat1[3]*quat2[1],
+        // quat1[0]*quat2[3] + quat1[1]*quat2[2] - quat1[2]*quat2[1] + quat1[3]*quat2[0]
+         quat1[0] * quat2[3] + quat1[1] * quat2[2] - quat1[2] * quat2[1] + quat1[3] * quat2[0],
+        -quat1[0] * quat2[2] + quat1[1] * quat2[3] + quat1[2] * quat2[0] + quat1[3] * quat2[1],
+         quat1[0] * quat2[1] - quat1[1] * quat2[0] + quat1[2] * quat2[3] + quat1[3] * quat2[2],
+        -quat1[0] * quat2[0] - quat1[1] * quat2[1] - quat1[2] * quat2[2] + quat1[3] * quat2[3]
     );
 
     return ret_quat;
@@ -125,6 +151,21 @@ quat_t eulToQuat(orientation_t eul) {
     quat(2) = q.z();
     quat(3) = q.w();
 
+
+    // Abbreviations for the various angular functions
+    // double cr = cos(eul(0) * 0.5);
+    // double sr = sin(eul(0) * 0.5);
+    // double cp = cos(eul(1) * 0.5);
+    // double sp = sin(eul(1) * 0.5);
+    // double cy = cos(eul(2) * 0.5);
+    // double sy = sin(eul(2) * 0.5);
+
+    // quat_t quat;
+    // quat(0) = sr * cp * cy - cr * sp * sy;
+    // quat(1) = cr * sp * cy + sr * cp * sy;
+    // quat(2) = cr * cp * sy - sr * sp * cy;
+    // quat(3) = cr * cp * cy + sr * sp * sy;
+
     return quat;
 }
 
@@ -151,13 +192,26 @@ plane_t create_plane(quat_t powerline_direction, point_t drone_xyz) {
 
     vector_t plane_normal = rotateVector(eulToR(eul), unit_x);
 
-	plane_t projection_plane = {
+	plane_t projection_plane;
 
-		.p = drone_xyz,
-		.normal = plane_normal
-
-	};
+    projection_plane.p = drone_xyz;
+    projection_plane.normal = plane_normal;
 
 	return projection_plane;
 }
 
+
+pose_eul_t pose_NWU_to_NED(pose_eul_t NWU_pose) {
+
+    static rotation_matrix_t R_NWU_to_NED = eulToR(orientation_t(-M_PI, 0, 0));
+
+    pose_eul_t NED_pose;
+
+    NED_pose.position = R_NWU_to_NED * NWU_pose.position;
+
+    NED_pose.orientation(0) = NWU_pose.orientation(0); 
+    NED_pose.orientation(1) = -NWU_pose.orientation(1);         // Dirty hack
+    NED_pose.orientation(2) = -NWU_pose.orientation(2);
+
+    return NED_pose;
+}

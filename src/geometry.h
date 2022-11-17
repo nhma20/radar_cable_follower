@@ -55,6 +55,13 @@ typedef struct {
     
 } pose_t;
 
+typedef struct {
+
+	point_t position;
+	orientation_t orientation;
+    
+} pose_eul_t;
+
 
 
 
@@ -83,3 +90,5 @@ quat_t eulToQuat(orientation_t eul);
 transform_t getTransformMatrix(vector_t vec, quat_t quat);
 
 plane_t create_plane(quat_t powerline_direction, point_t drone_xyz);
+
+pose_eul_t pose_NWU_to_NED(pose_eul_t NWU_pose);

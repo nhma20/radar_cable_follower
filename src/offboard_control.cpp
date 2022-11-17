@@ -258,9 +258,9 @@ void OffboardControl::update_drone_pose(px4_msgs::msg::VehicleOdometry::SharedPt
 
 	_drone_pose_mutex.lock(); {
 
-		_drone_pose.position(0) = msg->position[0];
-		_drone_pose.position(1) = msg->position[1];
-		_drone_pose.position(2) = msg->position[2];
+		_drone_pose.position(0) = msg->x;
+		_drone_pose.position(1) = msg->y;
+		_drone_pose.position(2) = msg->z;
 
 		_drone_pose.quaternion(0) = msg->q[0];
 		_drone_pose.quaternion(1) = msg->q[1];
@@ -394,9 +394,9 @@ void OffboardControl::publish_tracking_setpoint() {
 
 	px4_msgs::msg::TrajectorySetpoint msg{};
 	msg.timestamp = _timestamp.load();
-	msg.position[0] = _alignment_pose.position(0); //x_frac; // in meters NED
-	msg.position[1] = - _alignment_pose.position(1); //y_frac; // in meters NED
-	msg.position[2] = - ( _alignment_pose.position(2) + 5 ); //z_frac; // in meters NED
+	msg.x = _alignment_pose.position(0); //x_frac; // in meters NED
+	msg.y = - _alignment_pose.position(1); //y_frac; // in meters NED
+	msg.z = - ( _alignment_pose.position(2) + 5 ); //z_frac; // in meters NED
 	// msg.yaw = _drone_orientation(2)-yaw_frac*target_yaw_eul(2); // rotation around z in radians
 	// msg.velocity[0] =   unit_velocity(0); // m/s NED
 	// msg.velocity[1] = - unit_velocity(1); // m/s NED
@@ -416,9 +416,9 @@ void OffboardControl::publish_hover_setpoint() const {
 
 	px4_msgs::msg::TrajectorySetpoint msg{};
 	msg.timestamp = _timestamp.load();
-	msg.position[0] = _drone_pose.position(0); 		// in meters NED
-	msg.position[1] = - _drone_pose.position(1);
-	msg.position[2] = - _hover_height;
+	msg.x = _drone_pose.position(0); 		// in meters NED
+	msg.y = - _drone_pose.position(1);
+	msg.z = - _hover_height;
 	msg.yaw = _drone_orientation(2);
 
 	_trajectory_setpoint_publisher->publish(msg);
@@ -433,9 +433,9 @@ void OffboardControl::publish_hold_setpoint() const {
 
 	px4_msgs::msg::TrajectorySetpoint msg{};
 	msg.timestamp = _timestamp.load();
-	msg.position[0] = 5;//_drone_pose.position(0); 		// in meters NED
-	msg.position[1] = 5;//- _drone_pose.position(1);
-	msg.position[2] = -15;// _drone_pose.position(2);
+	msg.x = 5;//_drone_pose.position(0); 		// in meters NED
+	msg.y = 5;//- _drone_pose.position(1);
+	msg.z = -15;// _drone_pose.position(2);
 	msg.yaw = _drone_orientation(2);
 
 	_trajectory_setpoint_publisher->publish(msg);

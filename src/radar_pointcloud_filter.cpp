@@ -27,16 +27,19 @@
 #include <vector>
 #include <deque>
 #include <string>
+#include <numeric>
 
 // PCL includes
 #include <pcl/ModelCoefficients.h>
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
 #include <pcl/common/transforms.h>
+#include <pcl/common/angles.h>
 #include <pcl/io/pcd_io.h>
 #include <pcl/filters/extract_indices.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/crop_box.h>
+#include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/features/normal_3d.h>
 #include <pcl/search/kdtree.h>
 #include <pcl/sample_consensus/method_types.h>
@@ -46,9 +49,12 @@
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/segmentation/extract_clusters.h>
 
+
 #include "opencv2/imgcodecs.hpp"
 #include "opencv2/highgui.hpp"
 #include "opencv2/imgproc.hpp"
+// #include "opencv2/core/hal/interface.hpp"
+
 
 #define DEG_PER_RAD 57.296
 #define PI 3.14159265
@@ -61,9 +67,9 @@ class RadarPCLFilter : public rclcpp::Node
 	public:
 		RadarPCLFilter() : Node("radar_pcl_filter_node") {
 			
-			// Params
+						// Params
 			this->declare_parameter<int>("concat_size", 200);
-			 
+			this->get_parameter("leaf_size", _concat_size);
 
 			this->declare_parameter<float>("leaf_size", 0.75);
 			this->get_parameter("leaf_size", _leaf_size);
@@ -74,23 +80,32 @@ class RadarPCLFilter : public rclcpp::Node
 			this->declare_parameter<float>("ground_threshold", 1.5);
 			this->get_parameter("ground_threshold", _ground_threshold);
 
-			this->declare_parameter<float>("cluster_parallelism_threshold", 1.);
-			this->get_parameter("cluster_parallelism_threshold", _cluster_parallelism_threshold);
-
-			this->declare_parameter<int>("cluster_min_size", 25);
-			this->get_parameter("cluster_min_size", _cluster_min_size);
+			this->declare_parameter<float>("drone_threshold", 0.5);
+			this->get_parameter("drone_threshold", _drone_threshold);
 
 			this->declare_parameter<float>("cluster_crop_radius", 20);
 			this->get_parameter("cluster_crop_radius", _cluster_crop_radius);
 
+			this->declare_parameter<float>("line_model_parallel_angle_threshold", 10.0);
+			this->get_parameter("line_model_parallel_angle_threshold", _line_model_parallel_angle_threshold);
+
 			this->declare_parameter<float>("line_model_distance_threshold", 1.5);
-			this->get_parameter("model_thresh", _line_model_distance_thresh);
+			this->get_parameter("line_model_distance_threshold", _line_model_distance_thresh);
 
 			this->declare_parameter<float>("line_model_inlier_threshold", 10.0);
-			this->get_parameter("model_thresh", _line_model_inlier_thresh);
+			this->get_parameter("line_model_inlier_threshold", _line_model_inlier_thresh);
 
-			this->declare_parameter<float>("line_model_pitch_threshold", 0.25);
-			this->get_parameter("model_thresh", _line_model_pitch_thresh);
+			this->declare_parameter<float>("line_model_pitch_threshold", 0.35);
+			this->get_parameter("line_model_pitch_threshold", _line_model_pitch_thresh);
+
+			this->declare_parameter<std::string>("voxel_or_time_concat", "voxel");
+			this->get_parameter("voxel_or_time_concat", _voxel_or_time_concat);
+
+			this->declare_parameter<std::string>("line_or_point_follow", "line");
+			this->get_parameter("line_or_point_follow", _line_or_point_follow);
+
+			this->declare_parameter<int>("point_follow_outlier_filter", 0);
+			this->get_parameter("point_follow_outlier_filter", _point_follow_outlier_filter);
 
 
 			raw_pcl_subscription_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
@@ -165,13 +180,16 @@ class RadarPCLFilter : public rclcpp::Node
 		rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr raw_pcl_subscription_;
 
 		float _ground_threshold;
+		float _drone_threshold;
 		float _height_above_ground = 0;
 		int _concat_size; 
+		std::string _voxel_or_time_concat;
+		std::string _line_or_point_follow;
+		int _point_follow_outlier_filter;
 		float _leaf_size;
 		float _model_thresh;
-		float _cluster_parallelism_threshold;
-		int _cluster_min_size;
 		float _cluster_crop_radius;
+		float _line_model_parallel_angle_threshold;
 		float _line_model_distance_thresh;
 		float _line_model_inlier_thresh;
 		float _line_model_pitch_thresh;
@@ -202,7 +220,8 @@ class RadarPCLFilter : public rclcpp::Node
 		void concatenate_poincloud_downsample(pcl::PointCloud<pcl::PointXYZ>::Ptr new_points,
 												pcl::PointCloud<pcl::PointXYZ>::Ptr concat_points);
 
-		void concatenate_poincloud_fixed_size(pcl::PointCloud<pcl::PointXYZ>::Ptr new_points);
+		void concatenate_poincloud_fixed_size(pcl::PointCloud<pcl::PointXYZ>::Ptr new_points,
+												pcl::PointCloud<pcl::PointXYZ>::Ptr concat_points);
 
 		void crop_distant_points(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
 									pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_cropped);
@@ -210,9 +229,16 @@ class RadarPCLFilter : public rclcpp::Node
 		void direction_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
 									pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered);
 
-		float direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in);
+		void direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
+										Eigen::Vector3f &dir_axis);
 
-		std::vector<line_model_t> line_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in);									
+		std::vector<line_model_t> line_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in);		
+
+		std::vector<line_model_t> parallel_line_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
+																	Eigen::Vector3f axis);
+
+		std::vector<line_model_t> follow_point_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
+																	Eigen::Vector3f axis);																						
 
 		void create_pointcloud_msg(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, auto * pcl_msg);
 
@@ -454,6 +480,182 @@ std::vector<line_model_t> RadarPCLFilter::line_extraction(pcl::PointCloud<pcl::P
 }
 
 
+std::vector<line_model_t> RadarPCLFilter::parallel_line_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
+																	Eigen::Vector3f axis)  {
+
+	std::vector<line_model_t> line_models;
+
+	if ( cloud_in->size() < 2 ) {
+		return line_models;
+	}
+
+	this->get_parameter("line_model_parallel_angle_threshold", _line_model_parallel_angle_threshold);
+	this->get_parameter("line_model_distance_threshold", _line_model_distance_thresh);
+	this->get_parameter("line_model_inlier_threshold", _line_model_inlier_thresh);
+
+	std::vector<float> yaw_list;
+
+	static pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients);
+	static pcl::PointIndices::Ptr inliers (new pcl::PointIndices);
+	// Create the segmentation object
+	static pcl::SACSegmentation<pcl::PointXYZ> seg;
+
+	seg.setOptimizeCoefficients (true);
+	seg.setModelType (pcl::SACMODEL_PARALLEL_LINE);
+	seg.setMethodType (pcl::SAC_RANSAC);
+	seg.setDistanceThreshold ((float)_line_model_distance_thresh);
+	seg.setAxis( (-1 * axis ) ); // needs to be negated for some reason?
+	seg.setEpsAngle(pcl::deg2rad((double)_line_model_parallel_angle_threshold));//(_line_model_parallel_angle_threshold/DEG_PER_RAD)); //90/DEG_PER_RAD);//
+
+	pcl::PointCloud<pcl::PointXYZ>::Ptr reduced_cloud (new pcl::PointCloud<pcl::PointXYZ>);
+	pcl::ExtractIndices<pcl::PointXYZ> extract;
+
+	pcl::copyPointCloud(*cloud_in, *reduced_cloud);
+
+	seg.setInputCloud (reduced_cloud);
+	seg.segment (*inliers, *coefficients);
+
+	if (inliers->indices.size() < (int)_line_model_inlier_thresh)
+	{
+		return _line_models;
+	}
+	
+	line_model_t line_model;
+	int count = 0;
+
+	// Continue line extraction if first line model has pitch below threshold and inliers above threshold
+	while (abs(coefficients->values[5]) < _line_model_pitch_thresh && 
+			inliers->indices.size() > (int)_line_model_inlier_thresh)
+	{
+
+		// RCLCPP_INFO(this->get_logger(),  "Axis: \n X %f\n Y %f\n Z %f\n", coefficients->values[3], coefficients->values[4], coefficients->values[5]);
+
+		// scale factor for X and Y to compensate ignoring Z
+		float z_factor = 1 / sqrt( pow(coefficients->values[3],2) + pow(coefficients->values[4],2) );
+		// calculate yaw in world frame (+90 to -90 deg relative to X direction)
+		float tmp_powerline_world_yaw = -1 * (abs(coefficients->values[3]) / coefficients->values[3]) * acos(abs(coefficients->values[3])) * z_factor;
+		
+		// break if difference between current and previous yaw is above 45 degrees (0.7854 rads)
+		if ( count++ > 0 && abs(tmp_powerline_world_yaw - yaw_list.back()) > 0.7854 )
+		{
+			break;
+		}
+
+		yaw_list.push_back(tmp_powerline_world_yaw);
+		
+		_powerline_world_yaw = tmp_powerline_world_yaw;
+		// RCLCPP_INFO(this->get_logger(),  "Powerline yaw: %f", (_powerline_world_yaw*DEG_PER_RAD));
+		
+		point_t pl_position(
+			coefficients->values[0],
+			coefficients->values[1], 
+			coefficients->values[2]
+		);
+
+		orientation_t temp_eul(
+			0,
+			0,
+			tmp_powerline_world_yaw
+		);
+
+		quat_t pl_quat = eulToQuat(temp_eul);
+
+		line_model = {
+
+            .position = pl_position,
+            .quaternion = pl_quat
+
+        };
+
+		line_models.push_back(line_model);
+
+		extract.setInputCloud(reduced_cloud);
+
+		extract.setIndices(inliers);
+		extract.setNegative(true);
+		extract.filter(*reduced_cloud); 
+		
+
+		if (reduced_cloud->size() < (int)_line_model_inlier_thresh)
+		{
+			break;
+		}
+		
+		seg.setInputCloud (reduced_cloud);
+		seg.segment (*inliers, *coefficients);
+	}		
+
+	if (line_models.size() > 0)
+	{
+		return line_models;
+	} else {
+		return _line_models; // to not remove last direction if none is found
+	}
+	
+		
+
+}
+
+std::vector<line_model_t> RadarPCLFilter::follow_point_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
+																	Eigen::Vector3f axis) {
+	
+	if (cloud_in->size() > 50)
+	{
+		this->get_parameter("point_follow_outlier_filter", _point_follow_outlier_filter);
+
+		if (_point_follow_outlier_filter > 0)
+		{
+		
+			// filter cloud for outliers
+			pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
+			sor.setInputCloud (cloud_in);
+			sor.setMeanK (5); // param this
+			sor.setStddevMulThresh (6.0); // and this?
+			sor.filter (*cloud_in);
+
+		}
+
+		// find highest point
+		pcl::PointXYZ max_z_point;
+		for (size_t i = 0; i < cloud_in->size (); ++i)
+		{
+			// Check if the point is invalid
+			if (!std::isfinite ((*cloud_in)[i].x) || 
+				!std::isfinite ((*cloud_in)[i].y) || 
+				!std::isfinite ((*cloud_in)[i].z))
+				continue;
+
+			if ((*cloud_in)[i].z > max_z_point.z) {
+				max_z_point = (*cloud_in)[i];
+			}
+		}
+
+	// create line model from hough angle and highest point XYZ
+	orientation_t hough_angle (
+		0,
+		0,
+		acos(axis(0))
+	);
+
+	std::vector<line_model_t> line_model_vec;
+	line_model_t line_model;
+
+	line_model.position(0) = max_z_point.x;
+	line_model.position(1) = max_z_point.y;
+	line_model.position(2) = max_z_point.z;
+
+	line_model.quaternion = eulToQuat(hough_angle);
+
+	line_model_vec.push_back(line_model);
+
+	_line_models = line_model_vec;
+
+	}
+
+	return _line_models; // only update if new data
+
+}
+
 void RadarPCLFilter::direction_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
 											pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered) {
 
@@ -518,39 +720,157 @@ void RadarPCLFilter::direction_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cl
 }
 
 
-float RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in) {
+void RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in, 
+												Eigen::Vector3f &dir_axis) {
 
 	int img_size = _cluster_crop_radius*10*2;
 	cv::Mat img(img_size, img_size, CV_8UC1, cv::Scalar(0));
 
+	// project point cloud onto ground and create mat from points
 	for (size_t i = 0; i < cloud_in->size(); i++)
 	{
 		pcl::PointXYZ point = (*cloud_in)[i];
 
-		float x_tmp = roundf( img_size/2 + 10.0*(point.x - _t_xyz(0)) );
-		float y_tmp = roundf( img_size/2 + 10.0*(point.y - _t_xyz(1)) );
+		// x and y swapped to align image with world x y (up = +x, left = +y)
+		float y_tmp = roundf( img_size/2 - 10.0*(point.x - _t_xyz(0)) );
+		float x_tmp = roundf( img_size/2 - 10.0*(point.y - _t_xyz(1)) );
 
 		// img.at<uchar>(x_tmp, y_tmp) = 255;
 		cv::circle(img, cv::Point(x_tmp,y_tmp),1, cv::Scalar(255,255,255), -1, 8,0);
 
 	}
 
-	// // Standard Hough Line Transform
-    // std::vector<cv::Vec2f> lines; // will hold the results of the detection
-    // cv::HoughLines(img, lines, 1, PI/180, 150, 0, 0 ); // runs the actual detection
-
 	// Probabilistic Line Transform
     std::vector<cv::Vec4i> linesP; // will hold the results of the detection
-	// 
+	std::vector<float> tmp_angles;
     cv::HoughLinesP(img, linesP, 1, PI/180, 35, 35, 30 ); // rho res pixels, theta res rads, min intersections, min line length, max line gap
     // Draw the lines
+	float tmp_pl_world_yaw = -0.0;
     for( size_t i = 0; i < linesP.size(); i++ )
     {
         cv::Vec4i l = linesP[i];
         cv::line( img, cv::Point(l[0], l[1]), cv::Point(l[2], l[3]), cv::Scalar(127,127,127), 3, cv::LINE_AA);
 		// break;
-    }
+		// RCLCPP_INFO(this->get_logger(),  "Points \n XY: %f %f \n XY: %f %f \n", (float)l[0], (float)l[1], (float)l[2], (float)l[3]);
+		
+		float diff_x = (float)l[0] - (float)l[2];
+		float diff_y = (float)l[1] - (float)l[3];
+		float ratio = diff_y / diff_x;
+
+		tmp_pl_world_yaw = (float)(abs(ratio) / ratio) * acos(abs(ratio));
+
+		if (isnan(tmp_pl_world_yaw) || tmp_pl_world_yaw != tmp_pl_world_yaw || tmp_pl_world_yaw == 0.0)
+		{
+			continue;
+		}
+
+		tmp_angles.push_back(tmp_pl_world_yaw);
+
+		// RCLCPP_INFO(this->get_logger(),  "Angle: %f\n", (tmp_pl_world_yaw*DEG_PER_RAD));
+	}
+
+
+
+	static float powerline_2d_angle = 0.0; 
+
+	// find most popular hough line angle
+	if (tmp_angles.size() > 1)
+	{
 	
+		sort(tmp_angles.begin(), tmp_angles.end());
+
+		std::vector<std::vector<float>> clusters;
+		float eps = (float)pcl::deg2rad((double)15.0);
+		float curr_angle = tmp_angles.at(0);
+		std::vector<float> curr_cluster;
+		curr_cluster.push_back(curr_angle);
+
+		// divide found hough angles into clusters
+		for (size_t i = 1; i < tmp_angles.size(); i++)
+		{			
+			if( abs(tmp_angles.at(i) - curr_angle) <= eps ) 
+			{
+				curr_cluster.push_back(tmp_angles.at(i));
+			} 
+			else 
+			{
+				clusters.push_back(curr_cluster);
+				curr_cluster.clear();
+				curr_cluster.push_back(tmp_angles.at(i));
+			}
+			curr_angle = tmp_angles.at(i);
+		}
+		clusters.push_back(curr_cluster);
+		
+		// print clusters
+		// RCLCPP_INFO(this->get_logger(),  "Angle values:");
+		for (size_t i = 0; i < clusters.size(); i++)
+		{
+			// RCLCPP_INFO(this->get_logger(),  "Cluster %d:", i);
+			for (size_t j = 0; j < clusters.at(i).size(); j++)
+			{
+				// RCLCPP_INFO(this->get_logger(),  "%f \t", clusters.at(i).at(j));
+			}
+			
+		}
+
+		// find biggest cluster
+		int biggest_cluster = -1;
+		int biggest_cluster_idx = -1;
+		int second_biggest_cluster = -2;
+		for (size_t i = 0; i < clusters.size(); i++)
+		{
+
+			if ((int)clusters.at(i).size() > biggest_cluster)
+			{
+				biggest_cluster = (int)clusters.at(i).size();
+				biggest_cluster_idx = (int)i;
+			}
+			else 
+			{
+				if ((int)clusters.at(i).size() > second_biggest_cluster)
+				{
+					second_biggest_cluster = (int)clusters.at(i).size();
+				}
+			}
+		}
+
+		if (biggest_cluster == second_biggest_cluster || biggest_cluster_idx < 0)
+		{
+			// empty or tie, no clear hough direction = keep previous powerline angle
+			powerline_2d_angle = powerline_2d_angle;
+		}
+		else
+		{
+			// average cluster with most votes
+			float count = (float)clusters.at(biggest_cluster_idx).size();
+			float sum = 0.0;
+
+			for (size_t i = 0; i < clusters.at(biggest_cluster_idx).size(); i++)
+			{
+				sum += clusters.at(biggest_cluster_idx).at(i);
+			}
+
+			powerline_2d_angle = sum / count;
+
+
+			// RCLCPP_INFO(this->get_logger(),  "Sum %f:", sum);
+			// RCLCPP_INFO(this->get_logger(),  "Count %f:", count);
+		}
+		
+	}
+	// RCLCPP_INFO(this->get_logger(),  "Angle %f:", powerline_2d_angle);
+
+	std::string txt_angle = std::to_string((int)roundf(powerline_2d_angle*DEG_PER_RAD));
+	
+	cv::putText(img, //target image
+            txt_angle, //text
+            cv::Point((img.cols / 2)-15, img.rows-25), //bottom-center position
+            cv::FONT_HERSHEY_DUPLEX,
+            1.0,
+            cv::Scalar(255,255,255), //font color
+            2);
+
 	// static int name_counter = 0;
 	// std::string filename = std::to_string(name_counter++);
 	// std::string extension = ".jpg";
@@ -558,10 +878,14 @@ float RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Pt
 	// std::string path = "/home/nm/uzh_ws/ros2_ws/test_folder/";
 	// cv::imwrite( (path+filename), img );
 
+	// update direction axis that is used for 3D parallel line fit
+	dir_axis(0) = cos(powerline_2d_angle);
+	dir_axis(1) = sin(powerline_2d_angle);
+	dir_axis(2) = 0;
 
 	sensor_msgs::msg::Image::SharedPtr msg = cv_bridge::CvImage(std_msgs::msg::Header(), "mono8", img).toImageMsg();
 
-	hough_line_pub->publish(*msg.get()); //
+	hough_line_pub->publish(*msg.get());
 
 }
 
@@ -586,11 +910,12 @@ void RadarPCLFilter::crop_distant_points(pcl::PointCloud<pcl::PointXYZ>::Ptr clo
 }
 
 
-void RadarPCLFilter::concatenate_poincloud_fixed_size(pcl::PointCloud<pcl::PointXYZ>::Ptr new_points) {
+void RadarPCLFilter::concatenate_poincloud_fixed_size(pcl::PointCloud<pcl::PointXYZ>::Ptr new_points,
+														pcl::PointCloud<pcl::PointXYZ>::Ptr concat_points) {
 // concatenates pointclouds until _concat_size is reached then removes oldest points
 	this->get_parameter("concat_size", _concat_size);
 
-	*_concat_points += *new_points;
+	*concat_points += *new_points;
 
 	_concat_history.push_back(new_points->size());
 
@@ -604,10 +929,10 @@ void RadarPCLFilter::concatenate_poincloud_fixed_size(pcl::PointCloud<pcl::Point
 		}
 
 		pcl::ExtractIndices<pcl::PointXYZ> extract;
-		extract.setInputCloud(_concat_points);
+		extract.setInputCloud(concat_points);
 		extract.setIndices(inliers);
 		extract.setNegative(true);
-		extract.filter(*_concat_points);
+		extract.filter(*concat_points);
 
 		_concat_history.pop_front();
 	}
@@ -701,7 +1026,8 @@ void RadarPCLFilter::transform_pointcloud_to_world(const sensor_msgs::msg::Point
 
 	// filter ground and drone points 
 	this->get_parameter("ground_threshold", _ground_threshold);
-	RadarPCLFilter::filter_pointcloud(_ground_threshold, 0.5, world_points);
+	this->get_parameter("ground_threshold", _drone_threshold);
+	RadarPCLFilter::filter_pointcloud(_ground_threshold, _drone_threshold, world_points);
 
 	if (world_points->size() < 1)
 	{
@@ -712,15 +1038,45 @@ void RadarPCLFilter::transform_pointcloud_to_world(const sensor_msgs::msg::Point
 
 	// RCLCPP_INFO(this->get_logger(), "World cloud size: %d", world_points->size());
 
-	RadarPCLFilter::concatenate_poincloud_downsample(world_points, _concat_points);
+	this->get_parameter("voxel_or_time_concat", _voxel_or_time_concat);
+
+	if (_voxel_or_time_concat == "voxel")
+	{
+		RadarPCLFilter::concatenate_poincloud_downsample(world_points, _concat_points);
+	} else {
+		RadarPCLFilter::concatenate_poincloud_fixed_size(world_points, _concat_points);
+	}
+	
+
+	
 
 	RadarPCLFilter::crop_distant_points(_concat_points, _concat_points);
+
+	static Eigen::Vector3f dir_axis;
+	RadarPCLFilter::direction_extraction_2D(_concat_points, dir_axis); // add lines sorting stuff at some point
+
+	// RCLCPP_INFO(this->get_logger(),  "Axis: \n X %f\n Y %f\n Z %f\n", dir_axis(0), dir_axis(1), dir_axis(2));
 
 	pcl::PointCloud<pcl::PointXYZ>::Ptr extracted_cloud (new pcl::PointCloud<pcl::PointXYZ>);
 	if (_concat_points->size() > 1)
 	{
+		this->get_parameter("line_or_point_follow", _line_or_point_follow);
 		// RadarPCLFilter::direction_extraction(_concat_points, extracted_cloud);
-		_line_models = RadarPCLFilter::line_extraction(_concat_points);
+		// _line_models = RadarPCLFilter::line_extraction(_concat_points);
+		if (_line_or_point_follow == "line")
+		{
+			_line_models = RadarPCLFilter::parallel_line_extraction(_concat_points, dir_axis);
+		}
+		else if (_line_or_point_follow == "point")
+		{
+			_line_models = RadarPCLFilter::follow_point_extraction(_concat_points, dir_axis);
+		}
+		else 
+		{
+			RCLCPP_INFO(this->get_logger(), "Invalid follow method: %s", _line_or_point_follow);
+		}
+		
+			
 	}
 	
 
@@ -731,8 +1087,6 @@ void RadarPCLFilter::transform_pointcloud_to_world(const sensor_msgs::msg::Point
 	auto pcl_msg = sensor_msgs::msg::PointCloud2();
 	RadarPCLFilter::create_pointcloud_msg(_concat_points, &pcl_msg);
 	output_pointcloud_pub->publish(pcl_msg);  
-
-	RadarPCLFilter::direction_extraction_2D(_concat_points);
 
 }
 
