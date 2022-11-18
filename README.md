@@ -15,14 +15,20 @@ Maximum number of concatenated pointclouds (if not using downsampling):
 Leaf size of voxel grid (if using downsampling):
 `ros2 param set /radar_pcl_filter_node leaf_size 0.75`
 
+Rate at which pointcloud is reduced (fixed or downsampling). 10/downsample_rate Hz, higer value is lower frequency, 1 is fastest.
+`ros2 param set /radar_pcl_filter_node downsample_rate 5`
+
 Height above ground below which all points are ignored (meters) (`float`):
 `ros2 param set /radar_pcl_filter_node ground_threshold 1.5`
 
 Points closer to the drone than this threshold are ignored (meters) (`float`):
 `ros2 param set /radar_pcl_filter_node drone_threshold 0.5`
 
-"Radius" of square around drone in which points are considered (meters) (´int´):
+"Radius" of square around drone in which points are considered (meters) (`int`):
 `ros2 param set /radar_pcl_filter_node cluster_crop_radius 20`
+
+Rate at which pointcloud is cropped. 10/crop_rate Hz, higer value is lower frequency, 1 is fastest.
+`ros2 param set /radar_pcl_filter_node crop_rate 5`
 
 Parallelism constraint when doing 3D line fit (degrees) (`float`):
 `ros2 param set /radar_pcl_filter_node line_model_parallel_angle_threshold 10.0`
