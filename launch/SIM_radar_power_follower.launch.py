@@ -40,7 +40,6 @@ def generate_launch_description():
         tf_drone_to_iwr,
         world_to_drone,
         lidar_to_mmwave,
-        tf_mmwave_to_iwr,
         radar_pointcloud_filter,
         offboard_control
     ])
