@@ -107,6 +107,9 @@ class RadarPCLFilter : public rclcpp::Node
 			this->declare_parameter<int>("point_follow_outlier_filter", 0);
 			this->get_parameter("point_follow_outlier_filter", _point_follow_outlier_filter);
 
+			this->declare_parameter<std::string>("sensor_upwards_or_downwards", "downwards");
+			this->get_parameter("sensor_upwards_or_downwards", _sensor_upwards_or_downwards);
+
 
 			raw_pcl_subscription_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
 			"/iwr6843_pcl",	10,
@@ -193,6 +196,7 @@ class RadarPCLFilter : public rclcpp::Node
 		float _line_model_distance_thresh;
 		float _line_model_inlier_thresh;
 		float _line_model_pitch_thresh;
+		std::string _sensor_upwards_or_downwards;
 
 		int _t_tries = 0;
 
@@ -687,7 +691,7 @@ void RadarPCLFilter::direction_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cl
 
 		_powerline_world_yaw = -1 * (abs(coefficients->values[3]) / coefficients->values[3]) * acos(abs(coefficients->values[3])) * z_factor;
 
-		RCLCPP_INFO(this->get_logger(),  "Powerline yaw: %f", (_powerline_world_yaw*DEG_PER_RAD));
+		// RCLCPP_INFO(this->get_logger(),  "Powerline yaw: %f", (_powerline_world_yaw*DEG_PER_RAD));
 	
 		orientation_t yaw_eul (
 			0.0,
@@ -952,16 +956,36 @@ void RadarPCLFilter::concatenate_poincloud_downsample(pcl::PointCloud<pcl::Point
 void RadarPCLFilter::filter_pointcloud(float ground_threshold, float drone_threshold, 
 										pcl::PointCloud<pcl::PointXYZ>::Ptr cloud) {
 	
+	this->get_parameter("sensor_upwards_or_downwards", _sensor_upwards_or_downwards);
+
 	int pcl_size = cloud->size();
 
 	pcl::PointIndices::Ptr inliers(new pcl::PointIndices());
 
 	for (size_t i = 0; i < (size_t)pcl_size; i++)
 	{
-		if ( ( cloud->at(i).z > ground_threshold )  && ( cloud->at(i).z < (_height_above_ground-drone_threshold) ) )
+
+		if (_sensor_upwards_or_downwards == "downwards")
 		{
-			inliers->indices.push_back(i);
+
+			if ( ( cloud->at(i).z > ground_threshold )  && ( cloud->at(i).z < (_height_above_ground-drone_threshold) ) )
+			{
+				inliers->indices.push_back(i);
+			}
+
 		}
+		else if (_sensor_upwards_or_downwards == "upwards")
+		{
+			if (  ( cloud->at(i).z > (_height_above_ground+drone_threshold) ) )
+			{
+				inliers->indices.push_back(i);
+			}
+		}
+		else
+		{
+			RCLCPP_INFO(this->get_logger(),  "Unknown sensor direction: %s \n Allowed values: 'upwards' or 'downwards'", _sensor_upwards_or_downwards.c_str());
+		}
+		
 	}
 
 	pcl::ExtractIndices<pcl::PointXYZ> extract;
