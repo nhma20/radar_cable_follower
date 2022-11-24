@@ -57,6 +57,7 @@
 // #include "opencv2/core/hal/interface.hpp"
 
 
+
 #define DEG_PER_RAD 57.296
 #define PI 3.14159265
 
@@ -196,6 +197,7 @@ class RadarPCLFilter : public rclcpp::Node
 		rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr raw_pcl_subscription_;
 
 		std::mutex _concat_cloud_mutex;
+		std::mutex _drone_xyz_mutex;
 
 		float _ground_threshold;
 		float _drone_threshold;
@@ -294,10 +296,13 @@ void RadarPCLFilter::update_tf() {
 		return;
 	}
 
+	_drone_xyz_mutex.lock(); {
 
-	_t_xyz(0) = t.transform.translation.x;
-	_t_xyz(1) = t.transform.translation.y;
-	_t_xyz(2) = t.transform.translation.z;
+		_t_xyz(0) = t.transform.translation.x;
+		_t_xyz(1) = t.transform.translation.y;
+		_t_xyz(2) = t.transform.translation.z;
+		
+	} _drone_xyz_mutex.unlock();
 
 	_t_rot(0) = t.transform.rotation.x;
 	_t_rot(1) = t.transform.rotation.y;
@@ -311,13 +316,37 @@ void RadarPCLFilter::update_powerline_poses() {
 
 	if (_line_models.size() > 0)
 	{
+		quat_t quat_vec(
+			_line_models.at(0).quaternion(0),
+			_line_models.at(0).quaternion(1),
+			_line_models.at(0).quaternion(2),
+			_line_models.at(0).quaternion(3)
+		);
+
+		static std::vector<point_t> new_point_vec;
+		static std::vector<id_point_t> prev_point_vec;
+		static int id_count = 0;
+		static point_t prev_drone_xyz;
+		static point_t new_drone_xyz;
 
 		auto pose_array_msg = geometry_msgs::msg::PoseArray();
 		pose_array_msg.header = std_msgs::msg::Header();
 		pose_array_msg.header.stamp = this->now();
 		pose_array_msg.header.frame_id = "world";
-		
-		plane_t proj_plane = create_plane(_line_models.at(0).quaternion, _t_xyz);
+
+		prev_drone_xyz = new_drone_xyz;
+
+		plane_t proj_plane;
+
+		_drone_xyz_mutex.lock(); {
+	
+			new_drone_xyz(0) = _t_xyz(0);
+			new_drone_xyz(1) = _t_xyz(1);
+			new_drone_xyz(2) = -_t_xyz(2);
+
+			proj_plane = create_plane(_line_models.at(0).quaternion, _t_xyz);
+
+		} _drone_xyz_mutex.unlock();
 
 		for (size_t i = 0; i < _line_models.size(); i++)
 		{	
@@ -327,6 +356,8 @@ void RadarPCLFilter::update_powerline_poses() {
 				_line_models.at(i).position(1),
 				_line_models.at(i).position(2)
 			);
+
+			new_point_vec.push_back(pl_point);
 
 			point_t proj_pl_point = projectPointOnPlane(pl_point, proj_plane);
 
@@ -345,11 +376,116 @@ void RadarPCLFilter::update_powerline_poses() {
 			pose_array_msg.poses.push_back(pose_msg);
 		}
 
-		direction_array_pub->publish(pose_array_msg);
+		orientation_t euler = quatToEul(quat_vec);
+
+		euler(0) = 0.0;
+		euler(1) = 0.0;
+		euler(2) = - euler(2);
+
+		quat_t opposite_quat = eulToQuat(euler);
+		rotation_matrix_t rot = quatToMat(opposite_quat);
+
+		point_t drone_xyz_delta = new_drone_xyz - prev_drone_xyz;
+		
+
+		// look for matches to merge new and existing point
+		for (size_t i = 0; i < new_point_vec.size(); i++)
+		{
+			// TODO: GET POINTS TO ORIGO BEFORE ROTATING TO MINIMIZE WOBBLE - works?
+			// - Get ID poses down from 2x Z
+			new_point_vec.at(i) = new_point_vec.at(i) - new_drone_xyz; // (new_point_vec.at(i) + drone_xyz_delta) - new_drone_xyz;
+			new_point_vec.at(i) = rotateVector(rot, new_point_vec.at(i));
+			bool merged = false;
+			
+			for (size_t j = 0; j < prev_point_vec.size(); j++)
+			{
+				float dist_y = abs( (prev_point_vec.at(j).point(1) + drone_xyz_delta(1)) - new_point_vec.at(i)(1) );
+				float dist_z = abs( (prev_point_vec.at(j).point(2) + drone_xyz_delta(2)) - new_point_vec.at(i)(2) );
+				float euclid_dist = sqrt( pow(dist_y, 2) + pow(dist_z, 2) );
+				
+				if (euclid_dist < 1.5) // param this
+				{
+					prev_point_vec.at(j).point(0) = 0.0; //new_point_vec.at(i)(0);
+					prev_point_vec.at(j).point(1) = ( new_point_vec.at(i)(1) + prev_point_vec.at(j).point(1) ) / 2.0f; //new_point_vec.at(i)(1); //
+					prev_point_vec.at(j).point(2) = ( new_point_vec.at(i)(2) + prev_point_vec.at(j).point(2) ) / 2.0f; //new_point_vec.at(i)(2); //
+					
+					if (prev_point_vec.at(j).alive_count < 500) // param this
+					{
+						prev_point_vec.at(j).alive_count = prev_point_vec.at(j).alive_count + 2;
+					}
+					
+					merged = true;
+
+					break;
+				}
+			}
+			
+			// add new point if no match found
+			if (merged == false)
+			{
+				id_point_t new_id_point;
+
+				new_id_point.point(0) = 0.0; //new_point_vec.at(i)(0); // 0.0;
+				new_id_point.point(1) = new_point_vec.at(i)(1);
+				new_id_point.point(2) = new_point_vec.at(i)(2);
+				new_id_point.id = id_count++;
+				new_id_point.alive_count = 100;
+
+				prev_point_vec.push_back(new_id_point);
+			}
+		}
+
+		// decrement all alive counters and remove ones at 0
+		for (size_t i = prev_point_vec.size(); i > 0; i--)
+		{
+			int idx = i-1;
+			prev_point_vec.at(idx).alive_count--;
+
+			if (prev_point_vec.at(idx).alive_count < 1)
+			{
+				prev_point_vec.erase(prev_point_vec.begin()+idx);
+			}
+		}
+		
+
+
+		auto track_pose_array_msg = geometry_msgs::msg::PoseArray();
+		track_pose_array_msg.header = std_msgs::msg::Header();
+		track_pose_array_msg.header.stamp = this->now();
+		track_pose_array_msg.header.frame_id = "world";
+
+		for (size_t i = 0; i < prev_point_vec.size(); i++)
+		{
+
+			if (prev_point_vec.at(i).alive_count < 250)
+			{
+				continue;
+			}
+			
+
+			RCLCPP_INFO(this->get_logger(),  "\nPoint %d: \n X %f\t Y %f\t Z %f\t ID %d\t ALIVE %d\n", 
+				i, prev_point_vec.at(i).point(0), prev_point_vec.at(i).point(1), prev_point_vec.at(i).point(2), 
+				prev_point_vec.at(i).id, prev_point_vec.at(i).alive_count);
+		
+		
+			auto track_pose_msg = geometry_msgs::msg::Pose();
+			track_pose_msg.orientation.x = quatMultiply(quat_vec, opposite_quat)(0);
+			track_pose_msg.orientation.y = quatMultiply(quat_vec, opposite_quat)(1);
+			track_pose_msg.orientation.z = quatMultiply(quat_vec, opposite_quat)(2);
+			track_pose_msg.orientation.w = quatMultiply(quat_vec, opposite_quat)(3);
+			track_pose_msg.position.x = prev_point_vec.at(i).point(0);
+			track_pose_msg.position.y = prev_point_vec.at(i).point(1);
+			track_pose_msg.position.z = prev_point_vec.at(i).point(2);
+			track_pose_array_msg.poses.push_back(track_pose_msg);
+		}
+		
+		
+		new_point_vec.clear();
+
+		// direction_array_pub->publish(pose_array_msg);
+		direction_array_pub->publish(track_pose_array_msg);
 
 	}
-
-
 }
 
 
@@ -360,13 +496,16 @@ void RadarPCLFilter::add_new_radar_pointcloud(const sensor_msgs::msg::PointCloud
 		return;
 	}
 
+	homog_transform_t world_to_drone;
 
 	// make transform drone->world
+	_drone_xyz_mutex.lock(); {
 
-	_height_above_ground = _t_xyz(2); ///t.transform.translation.z;
+		_height_above_ground = _t_xyz(2); ///t.transform.translation.z;
 
+		world_to_drone = getTransformMatrix(_t_xyz, _t_rot);
 
-	homog_transform_t world_to_drone = getTransformMatrix(_t_xyz, _t_rot);
+	} _drone_xyz_mutex.unlock();
 
 	// transform points in pointcloud
 
@@ -779,10 +918,14 @@ void RadarPCLFilter::direction_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cl
 		pose_msg.pose.orientation.y = yaw_quat(1);
 		pose_msg.pose.orientation.z = yaw_quat(2);
 		pose_msg.pose.orientation.w = yaw_quat(3);
-		pose_msg.pose.position.x = _t_xyz(0);
-		pose_msg.pose.position.y = _t_xyz(1);
-		pose_msg.pose.position.z = _t_xyz(2);
 
+		_drone_xyz_mutex.lock(); {
+
+			pose_msg.pose.position.x = _t_xyz(0);
+			pose_msg.pose.position.y = _t_xyz(1);
+			pose_msg.pose.position.z = _t_xyz(2);
+			
+		} _drone_xyz_mutex.unlock();
 
 		pl_direction_pub->publish(pose_msg);
 
@@ -800,10 +943,14 @@ void RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Ptr
 	{
 		pcl::PointXYZ point = (*cloud_in)[i];
 
-		// x and y swapped to align image with world x y (up = +x, left = +y)
-		float y_tmp = roundf( img_size/2 - 10.0*(point.x - _t_xyz(0)) );
-		float x_tmp = roundf( img_size/2 - 10.0*(point.y - _t_xyz(1)) );
+		float y_tmp;
+		float x_tmp;
 
+		// x and y swapped to align image with world x y (up = +x, left = +y)
+		_drone_xyz_mutex.lock(); {
+			y_tmp = roundf( img_size/2 - 10.0*(point.x - _t_xyz(0)) );
+			x_tmp = roundf( img_size/2 - 10.0*(point.y - _t_xyz(1)) );
+		} _drone_xyz_mutex.unlock();
 		// img.at<uchar>(x_tmp, y_tmp) = 255;
 		cv::circle(img, cv::Point(x_tmp,y_tmp),1, cv::Scalar(255,255,255), -1, 8,0);
 
@@ -963,11 +1110,20 @@ void RadarPCLFilter::crop_distant_points(pcl::PointCloud<pcl::PointXYZ>::Ptr clo
 
 	this->get_parameter("cluster_crop_radius", _cluster_crop_radius);
 
-	float minX = _t_xyz(0) - _cluster_crop_radius;
-	float minY = _t_xyz(1) - _cluster_crop_radius;
+	float minX;
+	float minY;
+	float maxX;
+	float maxY;
 
-	float maxX = _t_xyz(0) + _cluster_crop_radius;
-	float maxY = _t_xyz(1) + _cluster_crop_radius;
+	_drone_xyz_mutex.lock(); {
+	
+		minX = _t_xyz(0) - _cluster_crop_radius;
+		minY = _t_xyz(1) - _cluster_crop_radius;
+
+		maxX = _t_xyz(0) + _cluster_crop_radius;
+		maxY = _t_xyz(1) + _cluster_crop_radius;
+
+	} _drone_xyz_mutex.unlock();
 
 	pcl::CropBox<pcl::PointXYZ> boxFilter;
 	boxFilter.setMin(Eigen::Vector4f(minX, minY, -1000, 1.0));

@@ -62,6 +62,14 @@ typedef struct {
     
 } pose_eul_t;
 
+typedef struct {
+
+    point_t point;
+    int id;
+    int alive_count;
+
+} id_point_t;
+
 
 
 
