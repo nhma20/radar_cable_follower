@@ -76,6 +76,7 @@ ament_target_dependencies(offboard_control
   Eigen3
   geometry_msgs
   px4_msgs
+  std_msgs
   tf2
   tf2_ros
   tf2_msgs

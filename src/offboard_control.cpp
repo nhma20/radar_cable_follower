@@ -53,6 +53,8 @@
 #include <geometry_msgs/msg/pose_array.hpp>
 #include <geometry_msgs/msg/point.hpp>
 #include <geometry_msgs/msg/point_stamped.hpp>
+#include <std_msgs/msg/int32.hpp>
+#include <radar_cable_follower/msg/tracked_powerlines.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/buffer.h>
@@ -88,7 +90,8 @@ public:
 		this->declare_parameter<float>("yaw_frac", 0.25);
 		this->declare_parameter<float>("pos_frac", 0.5);
 		this->declare_parameter<float>("powerline_following_distance", 10.0);
-		this->declare_parameter<float>("powerline_following_speed", 1.0);
+		this->declare_parameter<float>("powerline_following_speed", 0.25);
+		this->declare_parameter<int>("powerline_following_ID", -1);
 
 
 		// VehicleStatus: https://github.com/PX4/px4_msgs/blob/master/msg/VehicleStatus.msg
@@ -100,11 +103,18 @@ public:
 			});
 
 
-
-		_powerline_pose_sub = this->create_subscription<geometry_msgs::msg::PoseArray>(
-			"/powerline_array",	10,
+		_powerline_pose_sub = this->create_subscription<radar_cable_follower::msg::TrackedPowerlines>(
+			"/tracked_powerlines",	10,
 			std::bind(&OffboardControl::update_alignment_pose, this, std::placeholders::_1));
 
+
+		_selected_id_sub = this->create_subscription<std_msgs::msg::Int32>(
+			"/selected_id",	10,
+            [this](std_msgs::msg::Int32::ConstSharedPtr msg) {
+				_id_mutex.lock(); {
+					_selected_ID = msg->data;
+				} _id_mutex.unlock();
+			});
 
 
 		_follow_pose_pub = this->create_publisher<geometry_msgs::msg::PoseStamped>("/follow_pose", 10);
@@ -147,9 +157,10 @@ private:
 	rclcpp::Publisher<px4_msgs::msg::VehicleCommand>::SharedPtr _vehicle_command_publisher;
 	rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr _follow_pose_pub;
 
-	rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr _powerline_pose_sub;
+	rclcpp::Subscription<radar_cable_follower::msg::TrackedPowerlines>::SharedPtr _powerline_pose_sub;
 	rclcpp::Subscription<px4_msgs::msg::Timesync>::SharedPtr _timesync_sub;
 	rclcpp::Subscription<px4_msgs::msg::VehicleStatus>::SharedPtr _vehicle_status_sub;
+	rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr _selected_id_sub;
 
 	std::shared_ptr<tf2_ros::TransformListener> transform_listener_{nullptr};
 	std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -158,9 +169,11 @@ private:
 	int _arming_state;
 	geometry_msgs::msg::PoseArray::SharedPtr _powerline_array_msg; // auto?
 	int _counter = 0;
+	int _selected_ID = -1;
 
     bool _printed_offboard = false;
 
+	std::mutex _id_mutex;
 	std::mutex _drone_pose_mutex;
 	std::mutex _powerline_mutex;
 
@@ -172,7 +185,7 @@ private:
 
 	void flight_state_machine();
 	void update_drone_pose();
-	void update_alignment_pose(geometry_msgs::msg::PoseArray::SharedPtr msg);
+	void update_alignment_pose(radar_cable_follower::msg::TrackedPowerlines::SharedPtr msg);
 	void publish_offboard_control_mode() const;
 	void publish_hover_setpoint() const;
 	void publish_tracking_setpoint();
@@ -292,7 +305,7 @@ void OffboardControl::update_drone_pose() {
 }
 
 
-void OffboardControl::update_alignment_pose(geometry_msgs::msg::PoseArray::SharedPtr msg) {		
+void OffboardControl::update_alignment_pose(radar_cable_follower::msg::TrackedPowerlines::SharedPtr msg) {		
 		
 	if (msg->poses.size() < 1)
 	{
@@ -302,10 +315,27 @@ void OffboardControl::update_alignment_pose(geometry_msgs::msg::PoseArray::Share
 
 	float current_highest = 0;
 	size_t highest_index = 0;
+	int id = -1;
+
+	_id_mutex.lock(); {
+		id = _selected_ID;
+	} _id_mutex.unlock();
+
+	this->get_parameter("powerline_following_ID", id);
 
 	for (size_t i = 0; i < msg->poses.size(); i++)
 	{
-		if ( msg->poses[i].position.z > current_highest ){
+		// find powerline corresponding to selected ID
+		if (msg->ids[i] == id)
+		{
+			current_highest = msg->poses[i].position.z;
+			highest_index = i;
+			break;
+		}
+		
+		// else find highest powerline
+		if ( msg->poses[i].position.z > current_highest )
+		{
 			current_highest = msg->poses[i].position.z;
 			highest_index = i;
 		}

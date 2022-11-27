@@ -279,7 +279,7 @@ class RadarPCLFilter : public rclcpp::Node
 		std::vector<line_model_t> follow_point_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
 																Eigen::Vector3f axis);																						
 
-		void create_pointcloud_msg(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, auto * pcl_msg);
+		void create_pointcloud_msg(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, sensor_msgs::msg::PointCloud2 * pcl_msg);
 
 		void powerline_detection();
 
@@ -377,8 +377,8 @@ void RadarPCLFilter::update_powerline_poses() {
 
 		point_t proj_delta = projectPointOnPlane(zero_point, proj_plane);
 
-		RCLCPP_INFO(this->get_logger(),  "\nProj delta: \n X %f\t Y %f\t Z %f\n", 
-					proj_delta(0), proj_delta(1), proj_delta(2));
+		// RCLCPP_INFO(this->get_logger(),  "\nProj delta: \n X %f\t Y %f\t Z %f\n", 
+		// 			proj_delta(0), proj_delta(1), proj_delta(2));
 
 
 		this->get_parameter("tracking_update_euclid_dist", _tracking_update_euclid_dist);
@@ -472,7 +472,7 @@ void RadarPCLFilter::update_powerline_poses() {
 				tracked_count++;
 				
 
-				RCLCPP_INFO(this->get_logger(),  "\nPoint %d: \n X %f\t Y %f\t Z %f\t ID %d\t ALIVE %d\n", 
+				RCLCPP_INFO(this->get_logger(),  "\nPoint %d: \n X %f\n Y %f\n Z %f\n ID %d\n ALIVE %d\n", 
 					i, prev_point_vec.at(i).point(0), prev_point_vec.at(i).point(1), prev_point_vec.at(i).point(2), 
 					prev_point_vec.at(i).id, prev_point_vec.at(i).alive_count);
 			
@@ -554,7 +554,7 @@ void RadarPCLFilter::add_new_radar_pointcloud(const sensor_msgs::msg::PointCloud
 }
 
 
-void RadarPCLFilter::create_pointcloud_msg(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, auto * pcl_msg) {
+void RadarPCLFilter::create_pointcloud_msg(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, sensor_msgs::msg::PointCloud2 * pcl_msg) {
 
   // create PointCloud2 msg
 	//https://github.com/ros-drivers/velodyne/blob/master/velodyne_laserscan/tests/system.cpp
@@ -647,7 +647,7 @@ std::vector<line_model_t> RadarPCLFilter::line_extraction(pcl::PointCloud<pcl::P
 
 	// Continue line extraction if first line model has pitch below threshold and inliers above threshold
 	while (abs(coefficients->values[5]) < _line_model_pitch_thresh && 
-			inliers->indices.size() > (int)_line_model_inlier_thresh)
+			(int)inliers->indices.size() > (int)_line_model_inlier_thresh)
 	{
 		// scale factor for X and Y to compensate ignoring Z
 		float z_factor = 1 / sqrt( pow(coefficients->values[3],2) + pow(coefficients->values[4],2) );
@@ -679,12 +679,8 @@ std::vector<line_model_t> RadarPCLFilter::line_extraction(pcl::PointCloud<pcl::P
 
 		quat_t pl_quat = eulToQuat(temp_eul);
 
-		line_model = {
-
-            .position = pl_position,
-            .quaternion = pl_quat
-
-        };
+        line_model.position = pl_position;
+        line_model.quaternion = pl_quat;
 
 		line_models.push_back(line_model);
 
@@ -695,7 +691,7 @@ std::vector<line_model_t> RadarPCLFilter::line_extraction(pcl::PointCloud<pcl::P
 		extract.filter(*reduced_cloud); 
 		
 
-		if (reduced_cloud->size() < (int)_line_model_inlier_thresh)
+		if ((int)reduced_cloud->size() < (int)_line_model_inlier_thresh)
 		{
 			break;
 		}
@@ -751,7 +747,7 @@ std::vector<line_model_t> RadarPCLFilter::parallel_line_extraction(pcl::PointClo
 	seg.setInputCloud (reduced_cloud);
 	seg.segment (*inliers, *coefficients);
 
-	if (inliers->indices.size() < (int)_line_model_inlier_thresh)
+	if ((int)inliers->indices.size() < (int)_line_model_inlier_thresh)
 	{
 		return _line_models;
 	}
@@ -761,7 +757,7 @@ std::vector<line_model_t> RadarPCLFilter::parallel_line_extraction(pcl::PointClo
 
 	// Continue line extraction if first line model has pitch below threshold and inliers above threshold
 	while (abs(coefficients->values[5]) < _line_model_pitch_thresh && 
-			inliers->indices.size() > (int)_line_model_inlier_thresh)
+			(int)inliers->indices.size() > (int)_line_model_inlier_thresh)
 	{
 
 		// RCLCPP_INFO(this->get_logger(),  "Axis: \n X %f\n Y %f\n Z %f\n", coefficients->values[3], coefficients->values[4], coefficients->values[5]);
@@ -796,12 +792,8 @@ std::vector<line_model_t> RadarPCLFilter::parallel_line_extraction(pcl::PointClo
 
 		quat_t pl_quat = eulToQuat(temp_eul);
 
-		line_model = {
-
-            .position = pl_position,
-            .quaternion = pl_quat
-
-        };
+	    line_model.position = pl_position;
+        line_model.quaternion = pl_quat;
 
 		line_models.push_back(line_model);
 
@@ -812,7 +804,7 @@ std::vector<line_model_t> RadarPCLFilter::parallel_line_extraction(pcl::PointClo
 		extract.filter(*reduced_cloud); 
 		
 
-		if (reduced_cloud->size() < (int)_line_model_inlier_thresh)
+		if ((int)reduced_cloud->size() < _line_model_inlier_thresh)
 		{
 			break;
 		}
@@ -1167,7 +1159,7 @@ void RadarPCLFilter::fixed_size_pointcloud(pcl::PointCloud<pcl::PointXYZ>::Ptr n
 
 	_concat_history.push_back(new_points->size());
 
-	if (_concat_history.size() > _concat_size)
+	if ((int)_concat_history.size() > _concat_size)
 	{
 		pcl::PointIndices::Ptr inliers(new pcl::PointIndices());
 
