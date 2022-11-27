@@ -76,3 +76,6 @@ Distance to powerline during following (meters) (`float`):
 Speed of drone during powerline following. Negative is reverse direction (m/s) (`float`):
 `ros2 param set /offboard_control powerline_following_speed 1.0`
 
+ID of detected powerline to follow (`int`):
+`ros2 param set /offboard_control powerline_following_ID -1`
+
