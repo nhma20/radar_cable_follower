@@ -13,6 +13,8 @@
 #include <sensor_msgs/msg/image.hpp>
 #include "cv_bridge/cv_bridge.h"
 #include "geometry.h"
+#include "radar_cable_follower/msg/tracked_powerlines.hpp"
+
 
  // MISC includes
 #include <algorithm>
@@ -112,8 +114,14 @@ class RadarPCLFilter : public rclcpp::Node
 			this->declare_parameter<std::string>("sensor_upwards_or_downwards", "downwards");
 			this->get_parameter("sensor_upwards_or_downwards", _sensor_upwards_or_downwards);
 
-			this->declare_parameter<int>("add_crop_downsample_rate", 5);
+			this->declare_parameter<int>("add_crop_downsample_rate", 10);
 			this->get_parameter("add_crop_downsample_rate", _add_crop_downsample_rate);
+
+			this->declare_parameter<float>("tracking_update_ratio", 0.01);
+			this->get_parameter("tracking_update_ratio", _tracking_update_ratio);
+
+			this->declare_parameter<float>("tracking_update_euclid_dist", 1.5);
+			this->get_parameter("tracking_update_euclid_dist", _tracking_update_euclid_dist);
 
 
 			raw_pcl_subscription_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
@@ -124,11 +132,11 @@ class RadarPCLFilter : public rclcpp::Node
 
 			pl_direction_pub = this->create_publisher<geometry_msgs::msg::PoseStamped>("/powerline_direction", 10);
 
-			direction_array_pub = this->create_publisher<geometry_msgs::msg::PoseArray>("/powerline_array", 10);
-
 			hough_line_pub = this->create_publisher<sensor_msgs::msg::Image>("/hough_line_img", 10);
 			
-			debug_array_pub = this->create_publisher<geometry_msgs::msg::PoseArray>("/debug_array", 10);
+			vis_tracked_powerlines_pub = this->create_publisher<geometry_msgs::msg::PoseArray>("/vis_powerlines_array", 10);
+
+			tracked_powerlines_pub = this->create_publisher<radar_cable_follower::msg::TrackedPowerlines>("/tracked_powerlines", 10);
 
 			tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
 			transform_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -141,7 +149,7 @@ class RadarPCLFilter : public rclcpp::Node
 			_timer_tf = this->create_wall_timer(33ms, 
 				std::bind(&RadarPCLFilter::update_tf, this)); //, std::placeholders::_1
 
-			_timer_pcl = this->create_wall_timer(100ms, 
+			_timer_pcl = this->create_wall_timer(33ms, 
 				std::bind(&RadarPCLFilter::powerline_detection, this)); //, std::placeholders::_1
 
 
@@ -190,9 +198,9 @@ class RadarPCLFilter : public rclcpp::Node
 
 		rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr output_pointcloud_pub;
 		rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pl_direction_pub;
-		rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr direction_array_pub;
 		rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr hough_line_pub;
-		rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr debug_array_pub;
+		rclcpp::Publisher<radar_cable_follower::msg::TrackedPowerlines>::SharedPtr tracked_powerlines_pub;
+		rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr vis_tracked_powerlines_pub;
 
 		rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr raw_pcl_subscription_;
 
@@ -215,6 +223,8 @@ class RadarPCLFilter : public rclcpp::Node
 		float _line_model_pitch_thresh;
 		std::string _sensor_upwards_or_downwards;
 		int _add_crop_downsample_rate;
+		float _tracking_update_ratio;
+		float _tracking_update_euclid_dist;
 
 		int _t_tries = 0;
 
@@ -347,59 +357,51 @@ void RadarPCLFilter::update_powerline_poses() {
 		for (size_t i = 0; i < _line_models.size(); i++)
 		{	
 
-			// point_t pl_point(
-			// 	_line_models.at(i).position(0),
-			// 	_line_models.at(i).position(1),
-			// 	_line_models.at(i).position(2)
-			// );
-
-
 			point_t proj_pl_point = projectPointOnPlane(_line_models.at(i).position, proj_plane);
-
-			// RCLCPP_INFO(this->get_logger(),  "Proj point: \n X %f \n Y %f \n Z %f", proj_pl_point(0), proj_pl_point(1), proj_pl_point(2));
 			
 			new_point_vec.push_back(proj_pl_point);
 
 			new_quat_vec.push_back(_line_models.at(i).quaternion);
 
-			auto pose_msg = geometry_msgs::msg::Pose();
-
-			pose_msg.orientation.x = _line_models.at(i).quaternion(0);
-			pose_msg.orientation.y = _line_models.at(i).quaternion(1);
-			pose_msg.orientation.z = _line_models.at(i).quaternion(2);
-			pose_msg.orientation.w = _line_models.at(i).quaternion(3);
-			pose_msg.position.x = proj_pl_point(0);
-			pose_msg.position.y = proj_pl_point(1);
-			pose_msg.position.z = proj_pl_point(2);
-
-			pose_array_msg.poses.push_back(pose_msg);
 		}
 
 
 		point_t drone_xyz_delta = new_drone_xyz - prev_drone_xyz;
-		
+
+		proj_plane = create_plane(_line_models.at(0).quaternion, drone_xyz_delta);
+
+		point_t zero_point;
+		zero_point(0) = 0.0;
+		zero_point(1) = 0.0;
+		zero_point(2) = 0.0;
+
+		point_t proj_delta = projectPointOnPlane(zero_point, proj_plane);
+
+		RCLCPP_INFO(this->get_logger(),  "\nProj delta: \n X %f\t Y %f\t Z %f\n", 
+					proj_delta(0), proj_delta(1), proj_delta(2));
+
+
+		this->get_parameter("tracking_update_euclid_dist", _tracking_update_euclid_dist);
+		this->get_parameter("tracking_update_ratio", _tracking_update_ratio);
+		float one_minus_ratio = 1.0 - _tracking_update_ratio;
 
 		// look for matches to merge new and existing point
 		for (size_t i = 0; i < new_point_vec.size(); i++)
 		{
-			// TODO: GET POINTS TO ORIGO BEFORE ROTATING TO MINIMIZE WOBBLE - works?
-			// - Get ID poses down from 2x Z
-			// new_point_vec.at(i) = new_point_vec.at(i) - new_drone_xyz; // (new_point_vec.at(i) + drone_xyz_delta) - new_drone_xyz;
-			// new_point_vec.at(i) = rotateVector(rot, new_point_vec.at(i));
 			bool merged = false;
 			
 			for (size_t j = 0; j < prev_point_vec.size(); j++)
 			{				
-				float dist_x = abs( (prev_point_vec.at(j).point(0) + drone_xyz_delta(0)) - new_point_vec.at(i)(0) );
-				float dist_y = abs( (prev_point_vec.at(j).point(1) + drone_xyz_delta(1)) - new_point_vec.at(i)(1) );
-				float dist_z = abs( (prev_point_vec.at(j).point(2) + drone_xyz_delta(2)) - new_point_vec.at(i)(2) );
+				float dist_x = abs( (prev_point_vec.at(j).point(0) + proj_delta(0)) - new_point_vec.at(i)(0) );
+				float dist_y = abs( (prev_point_vec.at(j).point(1) + proj_delta(1)) - new_point_vec.at(i)(1) );
+				float dist_z = abs( (prev_point_vec.at(j).point(2) + proj_delta(2)) - new_point_vec.at(i)(2) );
 				float euclid_dist = sqrt( pow(dist_x, 2) + pow(dist_y, 2) + pow(dist_z, 2) );
 				
-				if (euclid_dist < 1.5) // param this
+				if (euclid_dist < _tracking_update_euclid_dist)
 				{
-					prev_point_vec.at(j).point(0) = ( new_point_vec.at(i)(0) + prev_point_vec.at(j).point(0) ) / 2.0f; //new_point_vec.at(i)(0);
-					prev_point_vec.at(j).point(1) = ( new_point_vec.at(i)(1) + prev_point_vec.at(j).point(1) ) / 2.0f; //new_point_vec.at(i)(1);
-					prev_point_vec.at(j).point(2) = ( new_point_vec.at(i)(2) + prev_point_vec.at(j).point(2) ) / 2.0f; //new_point_vec.at(i)(2);
+					prev_point_vec.at(j).point(0) = _tracking_update_ratio * new_point_vec.at(i)(0) + one_minus_ratio * (prev_point_vec.at(j).point(0) + proj_delta(0)); //( new_point_vec.at(i)(0) + prev_point_vec.at(j).point(0) ) / 2.0f; //new_point_vec.at(i)(0);
+					prev_point_vec.at(j).point(1) = _tracking_update_ratio * new_point_vec.at(i)(1) + one_minus_ratio * (prev_point_vec.at(j).point(1) + proj_delta(1)); //( new_point_vec.at(i)(1) + prev_point_vec.at(j).point(1) ) / 2.0f; //new_point_vec.at(i)(1);
+					prev_point_vec.at(j).point(2) = _tracking_update_ratio * new_point_vec.at(i)(2) + one_minus_ratio * (prev_point_vec.at(j).point(2) + proj_delta(2)); //( new_point_vec.at(i)(2) + prev_point_vec.at(j).point(2) ) / 2.0f; //new_point_vec.at(i)(2);
 					
 					prev_quat_vec.at(j) = new_quat_vec.at(i);
 
@@ -444,13 +446,20 @@ void RadarPCLFilter::update_powerline_poses() {
 			}
 		}
 		
-
+		// publish message
 		if (prev_point_vec.size() > 0)
 		{		
 			auto track_pose_array_msg = geometry_msgs::msg::PoseArray();
 			track_pose_array_msg.header = std_msgs::msg::Header();
 			track_pose_array_msg.header.stamp = this->now();
 			track_pose_array_msg.header.frame_id = "world";
+
+			auto tracked_powerlines_msg = radar_cable_follower::msg::TrackedPowerlines();
+			tracked_powerlines_msg.header = std_msgs::msg::Header();
+			tracked_powerlines_msg.header.stamp = this->now();
+			tracked_powerlines_msg.header.frame_id = "world";
+
+			int tracked_count = 0;
 
 			for (size_t i = 0; i < prev_point_vec.size(); i++)
 			{
@@ -459,6 +468,8 @@ void RadarPCLFilter::update_powerline_poses() {
 				{
 					continue;
 				}
+
+				tracked_count++;
 				
 
 				RCLCPP_INFO(this->get_logger(),  "\nPoint %d: \n X %f\t Y %f\t Z %f\t ID %d\t ALIVE %d\n", 
@@ -474,17 +485,23 @@ void RadarPCLFilter::update_powerline_poses() {
 				track_pose_msg.position.x = prev_point_vec.at(i).point(0);
 				track_pose_msg.position.y = prev_point_vec.at(i).point(1);
 				track_pose_msg.position.z = prev_point_vec.at(i).point(2);
+				
 				track_pose_array_msg.poses.push_back(track_pose_msg);
+
+				tracked_powerlines_msg.poses.push_back(track_pose_msg);
+				tracked_powerlines_msg.ids.push_back(prev_point_vec.at(i).id);
 			}
 
-			debug_array_pub->publish(track_pose_array_msg);
+			tracked_powerlines_msg.count = tracked_count;
+
+			tracked_powerlines_pub->publish(tracked_powerlines_msg);
+
+			vis_tracked_powerlines_pub->publish(track_pose_array_msg);
 		}
 		
 		
 		new_point_vec.clear();
 		new_quat_vec.clear();
-
-		direction_array_pub->publish(pose_array_msg);
 
 	}
 }
@@ -1273,35 +1290,33 @@ void RadarPCLFilter::powerline_detection() {
 		}
 
 		since_add_crop_downsample = 0;
-	}
-	
 
+		static Eigen::Vector3f dir_axis;
+		RadarPCLFilter::direction_extraction_2D(_pl_search_cloud, dir_axis);
 
-	static Eigen::Vector3f dir_axis;
-	RadarPCLFilter::direction_extraction_2D(_pl_search_cloud, dir_axis); // add lines sorting stuff at some point
-
-	pcl::PointCloud<pcl::PointXYZ>::Ptr extracted_cloud (new pcl::PointCloud<pcl::PointXYZ>);
-	if (_pl_search_cloud->size() > 1)
-	{
-		this->get_parameter("line_or_point_follow", _line_or_point_follow);
-
-		if (_line_or_point_follow == "line")
+		pcl::PointCloud<pcl::PointXYZ>::Ptr extracted_cloud (new pcl::PointCloud<pcl::PointXYZ>);
+		if (_pl_search_cloud->size() > 1)
 		{
-			_line_models = RadarPCLFilter::parallel_line_extraction(_pl_search_cloud, dir_axis);
-		}
-		else if (_line_or_point_follow == "point")
-		{
-			_line_models = RadarPCLFilter::follow_point_extraction(_pl_search_cloud, dir_axis);
-		}
-		else 
-		{
-			RCLCPP_INFO(this->get_logger(), "Invalid follow method: %s", _line_or_point_follow);
-		}
-		
-		auto pcl_msg = sensor_msgs::msg::PointCloud2();
-		RadarPCLFilter::create_pointcloud_msg(_pl_search_cloud, &pcl_msg);
-		output_pointcloud_pub->publish(pcl_msg);  
+			this->get_parameter("line_or_point_follow", _line_or_point_follow);
+
+			if (_line_or_point_follow == "line")
+			{
+				_line_models = RadarPCLFilter::parallel_line_extraction(_pl_search_cloud, dir_axis);
+			}
+			else if (_line_or_point_follow == "point")
+			{
+				_line_models = RadarPCLFilter::follow_point_extraction(_pl_search_cloud, dir_axis);
+			}
+			else 
+			{
+				RCLCPP_INFO(this->get_logger(), "Invalid follow method: %s", _line_or_point_follow);
+			}
 			
+			auto pcl_msg = sensor_msgs::msg::PointCloud2();
+			RadarPCLFilter::create_pointcloud_msg(_pl_search_cloud, &pcl_msg);
+			output_pointcloud_pub->publish(pcl_msg);  
+				
+		}
 	}
 }
 

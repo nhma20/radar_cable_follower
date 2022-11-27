@@ -18,10 +18,12 @@ endif()
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclpy REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(px4_msgs REQUIRED)
 find_package(builtin_interfaces REQUIRED)
 find_package(fastcdr REQUIRED)
@@ -34,8 +36,17 @@ find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_msgs REQUIRED)
 find_package(image_transport REQUIRED)
+find_package(radar_cable_follower REQUIRED)
 
 find_package(PCL 1.2 REQUIRED)
+
+
+
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/TrackedPowerlines.msg"
+  DEPENDENCIES geometry_msgs std_msgs
+)
+
 
 include_directories(${PCL_INCLUDE_DIRS})
 link_directories(${PCL_LIBRARY_DIRS})
@@ -68,6 +79,7 @@ ament_target_dependencies(offboard_control
   tf2
   tf2_ros
   tf2_msgs
+  radar_cable_follower
 )
 install(TARGETS offboard_control DESTINATION lib/${PROJECT_NAME})
 
@@ -88,6 +100,7 @@ ament_target_dependencies(radar_pointcloud_filter
   tf2_msgs
   OpenCV
   cv_bridge
+  radar_cable_follower
   PCL
 )
 install(TARGETS radar_pointcloud_filter DESTINATION lib/${PROJECT_NAME})

@@ -45,8 +45,21 @@ Whether to use voxel grid downsampling or remove oldest points after `concat_siz
 Whether to use highest point or line fit model following (`string`):
 `ros2 param set /radar_pcl_filter_node line_or_point_follow "point"`
 
-Whether to use statistical outlier filtering during point following (`int`):
-`ros2 param set /radar_pcl_filter_node point_follow_outlier_filter 1`
+
+
+Whether sensor points upwards or downwards (`string`: `upwards`/`downwards`):
+`ros2 param set /radar_pcl_filter_node sensor_upwards_or_downwards "downwards"`
+
+Rate at which pointcloud is processed (concat, reduce, analyze). Higer value is lower frequency, 1 is fastest. (`int`):
+`ros2 param set /radar_pcl_filter_node _add_crop_downsample_rate 10`
+
+Ratio with which current powerlines are updated with new measurement (`float`):
+`ros2 param set /radar_pcl_filter_node tracking_update_ratio 0.01`
+
+Distance below which a match is considered during tracking (`float`):
+`ros2 param set /radar_pcl_filter_node tracking_update_euclid_dist 1.5`
+
+
 
 
 ### Flight Parameters
