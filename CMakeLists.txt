@@ -41,111 +41,124 @@ find_package(radar_cable_follower REQUIRED)
 find_package(PCL 1.2 REQUIRED)
 
 
+# workaround to first build message, then rest of package
+set(A 0;1000)
 
-rosidl_generate_interfaces(${PROJECT_NAME}
-  "msg/TrackedPowerlines.msg"
-  DEPENDENCIES geometry_msgs std_msgs
-)
+foreach(X IN LISTS A)
 
+  if(X EQUAL 0)
 
-include_directories(${PCL_INCLUDE_DIRS})
-link_directories(${PCL_LIBRARY_DIRS})
-add_definitions(${PCL_DEFINITIONS})
+    rosidl_generate_interfaces(${PROJECT_NAME}
+    "msg/TrackedPowerlines.msg"
+    DEPENDENCIES geometry_msgs std_msgs
+    )
+    ament_package()
 
-add_executable(drone_frame_broadcaster
-  src/drone_frame_broadcaster_node.cpp
-  src/geometry.cpp
-)
-ament_target_dependencies(drone_frame_broadcaster
-  rclcpp
-  Eigen3
-  geometry_msgs
-  px4_msgs
-  tf2
-  tf2_ros
-)
-install(TARGETS drone_frame_broadcaster DESTINATION lib/${PROJECT_NAME})
+  endif()
+  
+  if(X EQUAL 999)
+    include_directories(${PCL_INCLUDE_DIRS})
+    link_directories(${PCL_LIBRARY_DIRS})
+    add_definitions(${PCL_DEFINITIONS})
 
-
-add_executable(offboard_control
-  src/offboard_control.cpp
-  src/geometry.cpp
-)
-ament_target_dependencies(offboard_control
-  rclcpp
-  Eigen3
-  geometry_msgs
-  px4_msgs
-  std_msgs
-  tf2
-  tf2_ros
-  tf2_msgs
-  radar_cable_follower
-)
-install(TARGETS offboard_control DESTINATION lib/${PROJECT_NAME})
+    add_executable(drone_frame_broadcaster
+      src/drone_frame_broadcaster_node.cpp
+      src/geometry.cpp
+    )
+    ament_target_dependencies(drone_frame_broadcaster
+      rclcpp
+      Eigen3
+      geometry_msgs
+      px4_msgs
+      tf2
+      tf2_ros
+    )
+    install(TARGETS drone_frame_broadcaster DESTINATION lib/${PROJECT_NAME})
 
 
-add_executable(radar_pointcloud_filter
-  src/radar_pointcloud_filter.cpp
-  src/geometry.cpp
-)
-target_link_libraries (radar_pointcloud_filter 
-  ${PCL_LIBRARIES}
-)
-ament_target_dependencies(radar_pointcloud_filter
-  rclcpp
-  sensor_msgs
-  px4_msgs
-  tf2
-  tf2_ros
-  tf2_msgs
-  OpenCV
-  cv_bridge
-  radar_cable_follower
-  PCL
-)
-install(TARGETS radar_pointcloud_filter DESTINATION lib/${PROJECT_NAME})
+    add_executable(offboard_control
+      src/offboard_control.cpp
+      src/geometry.cpp
+    )
+    ament_target_dependencies(offboard_control
+      rclcpp
+      Eigen3
+      geometry_msgs
+      px4_msgs
+      std_msgs
+      tf2
+      tf2_ros
+      tf2_msgs
+      radar_cable_follower
+    )
+    install(TARGETS offboard_control DESTINATION lib/${PROJECT_NAME})
 
 
-
-add_executable(lidar_to_mmwave_node
-   src/lidar_to_mmwave.cpp
-)
-ament_target_dependencies(lidar_to_mmwave_node
-   rclcpp sensor_msgs
-   geometry_msgs
-)
-install(TARGETS lidar_to_mmwave_node DESTINATION lib/${PROJECT_NAME})
+    add_executable(radar_pointcloud_filter
+      src/radar_pointcloud_filter.cpp
+      src/geometry.cpp
+    )
+    target_link_libraries (radar_pointcloud_filter 
+      ${PCL_LIBRARIES}
+    )
+    ament_target_dependencies(radar_pointcloud_filter
+      rclcpp
+      sensor_msgs
+      px4_msgs
+      tf2
+      tf2_ros
+      tf2_msgs
+      OpenCV
+      cv_bridge
+      radar_cable_follower
+      PCL
+    )
+    install(TARGETS radar_pointcloud_filter DESTINATION lib/${PROJECT_NAME})
 
 
 
-############
-# Install ##
-############
-# Install Python modules
-ament_python_install_package(${PROJECT_NAME})
-# Install Python executables
-install(PROGRAMS
-  scripts/image_drawer.py
-  scripts/image_decompress.py
-  scripts/draw_PL_IDs.py
-  scripts/print_PL_IDs.py
-  scripts/image_drawer_HW_compressed.py
-  DESTINATION lib/${PROJECT_NAME}
-)
-
-# Export information to downstream packages
-if(ROS_DISTRO IN_LIST ROS_DISTROS)
-  ament_export_dependencies(ament_cmake rclcpp rosidl_default_runtime eigen3_cmake_module Eigen3 px4_msgs geometry_msgs sensor_msgs OpenCV)
-else()
-  ament_export_dependencies(ament_cmake rclcpp rosidl_default_runtime Eigen3 px4_msgs geometry_msgs sensor_msgs)
-endif()
-
-# Install launch files
-install(DIRECTORY
-  launch
-  DESTINATION share/${PROJECT_NAME}
-)
+    add_executable(lidar_to_mmwave_node
+      src/lidar_to_mmwave.cpp
+    )
+    ament_target_dependencies(lidar_to_mmwave_node
+      rclcpp sensor_msgs
+      geometry_msgs
+    )
+    install(TARGETS lidar_to_mmwave_node DESTINATION lib/${PROJECT_NAME})
 
 
-ament_package()
+
+    ############
+    # Install ##
+    ############
+    # Install Python modules
+    ament_python_install_package(${PROJECT_NAME})
+    # Install Python executables
+    install(PROGRAMS
+      scripts/image_drawer.py
+      scripts/image_decompress.py
+      scripts/draw_PL_IDs.py
+      scripts/print_PL_IDs.py
+      scripts/image_drawer_HW_compressed.py
+      DESTINATION lib/${PROJECT_NAME}
+    )
+
+    # Export information to downstream packages
+    if(ROS_DISTRO IN_LIST ROS_DISTROS)
+      ament_export_dependencies(ament_cmake rclcpp rosidl_default_runtime eigen3_cmake_module Eigen3 px4_msgs geometry_msgs sensor_msgs OpenCV)
+    else()
+      ament_export_dependencies(ament_cmake rclcpp rosidl_default_runtime Eigen3 px4_msgs geometry_msgs sensor_msgs)
+    endif()
+
+    # Install launch files
+    install(DIRECTORY
+      launch
+      DESTINATION share/${PROJECT_NAME}
+    )
+
+
+    ament_package()
+
+  endif()
+  
+endforeach()
