@@ -36,7 +36,7 @@ find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_msgs REQUIRED)
 find_package(image_transport REQUIRED)
-find_package(radar_cable_follower REQUIRED)
+# find_package(radar_cable_follower REQUIRED)
 
 find_package(PCL 1.2 REQUIRED)
 
