@@ -54,7 +54,7 @@
 #include <geometry_msgs/msg/point.hpp>
 #include <geometry_msgs/msg/point_stamped.hpp>
 #include <std_msgs/msg/int32.hpp>
-#include <radar_cable_follower/msg/tracked_powerlines.hpp>
+#include <radar_cable_follower_msgs/msg/tracked_powerlines.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/buffer.h>
@@ -103,7 +103,7 @@ public:
 			});
 
 
-		_powerline_pose_sub = this->create_subscription<radar_cable_follower::msg::TrackedPowerlines>(
+		_powerline_pose_sub = this->create_subscription<radar_cable_follower_msgs::msg::TrackedPowerlines>(
 			"/tracked_powerlines",	10,
 			std::bind(&OffboardControl::update_alignment_pose, this, std::placeholders::_1));
 
@@ -157,7 +157,7 @@ private:
 	rclcpp::Publisher<px4_msgs::msg::VehicleCommand>::SharedPtr _vehicle_command_publisher;
 	rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr _follow_pose_pub;
 
-	rclcpp::Subscription<radar_cable_follower::msg::TrackedPowerlines>::SharedPtr _powerline_pose_sub;
+	rclcpp::Subscription<radar_cable_follower_msgs::msg::TrackedPowerlines>::SharedPtr _powerline_pose_sub;
 	rclcpp::Subscription<px4_msgs::msg::Timesync>::SharedPtr _timesync_sub;
 	rclcpp::Subscription<px4_msgs::msg::VehicleStatus>::SharedPtr _vehicle_status_sub;
 	rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr _selected_id_sub;
@@ -185,7 +185,7 @@ private:
 
 	void flight_state_machine();
 	void update_drone_pose();
-	void update_alignment_pose(radar_cable_follower::msg::TrackedPowerlines::SharedPtr msg);
+	void update_alignment_pose(radar_cable_follower_msgs::msg::TrackedPowerlines::SharedPtr msg);
 	void publish_offboard_control_mode() const;
 	void publish_hover_setpoint() const;
 	void publish_tracking_setpoint();
@@ -305,7 +305,7 @@ void OffboardControl::update_drone_pose() {
 }
 
 
-void OffboardControl::update_alignment_pose(radar_cable_follower::msg::TrackedPowerlines::SharedPtr msg) {		
+void OffboardControl::update_alignment_pose(radar_cable_follower_msgs::msg::TrackedPowerlines::SharedPtr msg) {		
 		
 	if (msg->poses.size() < 1)
 	{

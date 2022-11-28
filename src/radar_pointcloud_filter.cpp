@@ -13,7 +13,7 @@
 #include <sensor_msgs/msg/image.hpp>
 #include "cv_bridge/cv_bridge.h"
 #include "geometry.h"
-#include "radar_cable_follower/msg/tracked_powerlines.hpp"
+#include "radar_cable_follower_msgs/msg/tracked_powerlines.hpp"
 
 
  // MISC includes
@@ -136,7 +136,7 @@ class RadarPCLFilter : public rclcpp::Node
 			
 			vis_tracked_powerlines_pub = this->create_publisher<geometry_msgs::msg::PoseArray>("/vis_powerlines_array", 10);
 
-			tracked_powerlines_pub = this->create_publisher<radar_cable_follower::msg::TrackedPowerlines>("/tracked_powerlines", 10);
+			tracked_powerlines_pub = this->create_publisher<radar_cable_follower_msgs::msg::TrackedPowerlines>("/tracked_powerlines", 10);
 
 			tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
 			transform_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -199,7 +199,7 @@ class RadarPCLFilter : public rclcpp::Node
 		rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr output_pointcloud_pub;
 		rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pl_direction_pub;
 		rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr hough_line_pub;
-		rclcpp::Publisher<radar_cable_follower::msg::TrackedPowerlines>::SharedPtr tracked_powerlines_pub;
+		rclcpp::Publisher<radar_cable_follower_msgs::msg::TrackedPowerlines>::SharedPtr tracked_powerlines_pub;
 		rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr vis_tracked_powerlines_pub;
 
 		rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr raw_pcl_subscription_;
@@ -454,7 +454,7 @@ void RadarPCLFilter::update_powerline_poses() {
 			track_pose_array_msg.header.stamp = this->now();
 			track_pose_array_msg.header.frame_id = "world";
 
-			auto tracked_powerlines_msg = radar_cable_follower::msg::TrackedPowerlines();
+			auto tracked_powerlines_msg = radar_cable_follower_msgs::msg::TrackedPowerlines();
 			tracked_powerlines_msg.header = std_msgs::msg::Header();
 			tracked_powerlines_msg.header.stamp = this->now();
 			tracked_powerlines_msg.header.frame_id = "world";
