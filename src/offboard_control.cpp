@@ -92,6 +92,8 @@ public:
 		this->declare_parameter<float>("powerline_following_distance", 10.0);
 		this->declare_parameter<float>("powerline_following_speed", 0.25);
 		this->declare_parameter<int>("powerline_following_ID", -1);
+		this->declare_parameter<int>("launch_with_debug", 1);
+		this->get_parameter("launch_with_debug", _launch_with_debug);
 
 
 		// VehicleStatus: https://github.com/PX4/px4_msgs/blob/master/msg/VehicleStatus.msg
@@ -117,8 +119,10 @@ public:
 			});
 
 
-		_follow_pose_pub = this->create_publisher<geometry_msgs::msg::PoseStamped>("/follow_pose", 10);
-
+		if(_launch_with_debug > 0)
+		{
+			_follow_pose_pub = this->create_publisher<geometry_msgs::msg::PoseStamped>("/follow_pose", 10);
+		}
 
 		tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
 		transform_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -170,6 +174,7 @@ private:
 	geometry_msgs::msg::PoseArray::SharedPtr _powerline_array_msg; // auto?
 	int _counter = 0;
 	int _selected_ID = -1;
+	int _launch_with_debug;
 
     bool _printed_offboard = false;
 
@@ -205,13 +210,13 @@ void OffboardControl::flight_state_machine() {
 	// If drone not armed (from external controller) and put in offboard mode, do nothing
 	if (_nav_state != 14) 
 	{
-		if (_old_nav_state != _nav_state && _nav_state != 14)
+		if (_old_nav_state != _nav_state && _nav_state != 14 && _launch_with_debug > 0)
 		{				
 			RCLCPP_INFO(this->get_logger(), "nav_state: %d", _nav_state);
 			RCLCPP_INFO(this->get_logger(), "\n \nWaiting for offboard mode\n");
 		}
 
-		if (_old_nav_state != _nav_state && _nav_state == 14)
+		if (_old_nav_state != _nav_state && _nav_state == 14 && _launch_with_debug > 0)
 		{				
 			RCLCPP_INFO(this->get_logger(), "nav_state: %d", _nav_state);
 			RCLCPP_INFO(this->get_logger(), "\n \nOffboard mode enabled\n");
@@ -251,7 +256,7 @@ void OffboardControl::flight_state_machine() {
 	// }
 
 	else if(_counter < 1000000){
-		if(_counter == 10){
+		if(_counter == 10 && _launch_with_debug > 0){
 			RCLCPP_INFO(this->get_logger(), "\n \nBeginning alignment \n");
 		}
 		publish_offboard_control_mode();
@@ -541,18 +546,21 @@ void OffboardControl::publish_setpoint(px4_msgs::msg::TrajectorySetpoint msg) co
 
 	quat_t quat = eulToQuat(eul);
 
-	auto pose_msg = geometry_msgs::msg::PoseStamped();
-	pose_msg.header.stamp = this->now();
-	pose_msg.header.frame_id = "world";
-	pose_msg.pose.orientation.x = quat(0);
-	pose_msg.pose.orientation.y = quat(1);
-	pose_msg.pose.orientation.z = quat(2);
-	pose_msg.pose.orientation.w = quat(3);
-	pose_msg.pose.position.x = msg.position[0];
-	pose_msg.pose.position.y = -msg.position[1]; // NED to NWU
-	pose_msg.pose.position.z = -msg.position[2]; // NED to NWU
+	if (_launch_with_debug > 0)
+	{	
+		auto pose_msg = geometry_msgs::msg::PoseStamped();
+		pose_msg.header.stamp = this->now();
+		pose_msg.header.frame_id = "world";
+		pose_msg.pose.orientation.x = quat(0);
+		pose_msg.pose.orientation.y = quat(1);
+		pose_msg.pose.orientation.z = quat(2);
+		pose_msg.pose.orientation.w = quat(3);
+		pose_msg.pose.position.x = msg.position[0];
+		pose_msg.pose.position.y = -msg.position[1]; // NED to NWU
+		pose_msg.pose.position.z = -msg.position[2]; // NED to NWU
 
-	_follow_pose_pub->publish(pose_msg);
+		_follow_pose_pub->publish(pose_msg);
+	}
 
 	_trajectory_setpoint_publisher->publish(msg);
 }
