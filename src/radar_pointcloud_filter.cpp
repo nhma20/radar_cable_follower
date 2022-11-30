@@ -190,6 +190,8 @@ class RadarPCLFilter : public rclcpp::Node
 				pcl::PointCloud<pcl::PointXYZ>::Ptr tmp2_cloud (new pcl::PointCloud<pcl::PointXYZ>);
 				_pl_search_cloud = tmp2_cloud;
 
+				RCLCPP_INFO(this->get_logger(), "0");
+
 			}
 		}
 
@@ -1266,6 +1268,8 @@ void RadarPCLFilter::read_pointcloud(const sensor_msgs::msg::PointCloud2::Shared
 
 void RadarPCLFilter::powerline_detection() {
 
+	RCLCPP_INFO(this->get_logger(), "1");
+
 	this->get_parameter("voxel_or_time_concat", _voxel_or_time_concat);
 	this->get_parameter("add_crop_downsample_rate", _add_crop_downsample_rate);
 	
@@ -1295,8 +1299,12 @@ void RadarPCLFilter::powerline_detection() {
 
 		since_add_crop_downsample = 0;
 
+		RCLCPP_INFO(this->get_logger(), "2");
+
 		static Eigen::Vector3f dir_axis;
 		RadarPCLFilter::direction_extraction_2D(_pl_search_cloud, dir_axis);
+
+		RCLCPP_INFO(this->get_logger(), "3");
 
 		pcl::PointCloud<pcl::PointXYZ>::Ptr extracted_cloud (new pcl::PointCloud<pcl::PointXYZ>);
 		if (_pl_search_cloud->size() > 1)
@@ -1324,6 +1332,7 @@ void RadarPCLFilter::powerline_detection() {
 			}
 				
 		}
+		RCLCPP_INFO(this->get_logger(), "4");
 	}
 }
 
