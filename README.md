@@ -45,8 +45,6 @@ Whether to use voxel grid downsampling or remove oldest points after `concat_siz
 Whether to use highest point or line fit model following (`string`):
 `ros2 param set /radar_pcl_filter_node line_or_point_follow "point"`
 
-
-
 Whether sensor points upwards or downwards (`string`: `upwards`/`downwards`):
 `ros2 param set /radar_pcl_filter_node sensor_upwards_or_downwards "downwards"`
 
@@ -78,4 +76,7 @@ Speed of drone during powerline following. Negative is reverse direction (m/s) (
 
 ID of detected powerline to follow (`int`):
 `ros2 param set /offboard_control powerline_following_ID -1`
+
+Take off to height if set before entering offboard mode. If below 1, will instead align with powerlines in offboard mode (`float`):
+`ros2 param set /offboard_control take_off_to_height 0.0`
 

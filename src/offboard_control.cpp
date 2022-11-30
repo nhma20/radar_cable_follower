@@ -92,8 +92,12 @@ public:
 		this->declare_parameter<float>("powerline_following_distance", 10.0);
 		this->declare_parameter<float>("powerline_following_speed", 0.25);
 		this->declare_parameter<int>("powerline_following_ID", -1);
+
 		this->declare_parameter<int>("launch_with_debug", 1);
 		this->get_parameter("launch_with_debug", _launch_with_debug);
+
+		this->declare_parameter<float>("take_off_to_height", 0.0);
+		this->get_parameter("take_off_to_height", _takeoff_height);
 
 
 		// VehicleStatus: https://github.com/PX4/px4_msgs/blob/master/msg/VehicleStatus.msg
@@ -175,6 +179,7 @@ private:
 	int _counter = 0;
 	int _selected_ID = -1;
 	int _launch_with_debug;
+	float _takeoff_height;
 
     bool _printed_offboard = false;
 
@@ -192,7 +197,7 @@ private:
 	void update_drone_pose();
 	void update_alignment_pose(radar_cable_follower_msgs::msg::TrackedPowerlines::SharedPtr msg);
 	void publish_offboard_control_mode() const;
-	void publish_hover_setpoint() const;
+	void publish_takeoff_setpoint() const;
 	void publish_tracking_setpoint();
 	void publish_hold_setpoint() const;
 	void publish_setpoint(px4_msgs::msg::TrajectorySetpoint msg) const;
@@ -236,26 +241,19 @@ void OffboardControl::flight_state_machine() {
 		this->arm();
 	}
 
-	// if(_counter < 20){
-	// 	if(_counter == 0){
-	// 		RCLCPP_INFO(this->get_logger(), "Waiting two seconds \n");
-	// 	}
-	// 	publish_offboard_control_mode();
-	// 	publish_hold_setpoint();
-	// }
+	this->get_parameter("take_off_to_height", _takeoff_height);
+	if(_takeoff_height > 1){
+		static bool takeoff_print = false;
+		if(takeoff_print == false){
+			takeoff_print = true;
+			RCLCPP_INFO(this->get_logger(), "\n \nTaking off to %f meters\n", _takeoff_height);
+		}
+		publish_offboard_control_mode();
+		publish_takeoff_setpoint();
+		return;
+	}
 
-	// else if(_counter < 100){
-
-	// 	_counter = 100;
-	// 	if(_counter == 21){
-	// 		RCLCPP_INFO(this->get_logger(), "Holding position \n");
-	// 	}
-	// 	publish_offboard_control_mode();
-	// 	publish_hold_setpoint();
-		
-	// }
-
-	else if(_counter < 1000000){
+	else if(_counter < 1000000000){
 		if(_counter == 10 && _launch_with_debug > 0){
 			RCLCPP_INFO(this->get_logger(), "\n \nBeginning alignment \n");
 		}
@@ -490,19 +488,31 @@ void OffboardControl::publish_tracking_setpoint() {
 
 /**
  * @brief Publish a trajectory setpoint
- *        Drone should hover at hover_height_
+ *        Drone should take off to _takeoff_height
  */
-void OffboardControl::publish_hover_setpoint() const {
+void OffboardControl::publish_takeoff_setpoint() const {
+
+	static pose_eul_t NWU_to_NED_pose;	
+
+	static bool takeoff_start = true;
+	if (takeoff_start == true)
+	{	
+		// freeze takeoff setpoint
+		takeoff_start = false;
+		NWU_to_NED_pose.position = _drone_pose.position; 
+		NWU_to_NED_pose.orientation = quatToEul(_drone_pose.quaternion);
+		NWU_to_NED_pose = pose_NWU_to_NED(NWU_to_NED_pose);
+	}
 
 	px4_msgs::msg::TrajectorySetpoint msg{};
-	// msg.timestamp = _timestamp.load();
-	// msg.position[0] = _drone_pose.position(0); 		// in meters NED
-	// msg.position[1] = _drone_pose.position(1);
-	// msg.position[2] = _hover_height;
-	// // YAW is cropped to 0-PI for some reason, uncrop to 0-2PI based on if ROLL is 0 or PI
-	// msg.yaw = (float)_drone_orientation(2) + ( abs((float)_drone_orientation(0)) - PI );
+	msg.timestamp = _timestamp.load();
+	msg.position[0] = NWU_to_NED_pose.position(0); 		// in meters NED
+	msg.position[1] = NWU_to_NED_pose.position(1);
+	msg.position[2] = - _takeoff_height;
+	// YAW is cropped to 0-PI for some reason, uncrop to 0-2PI based on if ROLL is 0 or PI
+	msg.yaw = (float)NWU_to_NED_pose.orientation(2);
 
-	// OffboardControl::publish_setpoint(msg);
+	OffboardControl::publish_setpoint(msg);
 }
 
 
