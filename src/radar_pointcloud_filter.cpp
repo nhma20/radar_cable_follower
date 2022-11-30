@@ -141,17 +141,13 @@ class RadarPCLFilter : public rclcpp::Node
 
 			geometry_msgs::msg::TransformStamped drone_tf;
 
-			if (_launch_with_debug > 0)
-			{
-				vis_tracked_powerlines_pub = this->create_publisher<geometry_msgs::msg::PoseArray>("/vis_powerlines_array", 10);
-				
-				hough_line_pub = this->create_publisher<sensor_msgs::msg::Image>("/hough_line_img", 10);
-
-				output_pointcloud_pub = this->create_publisher<sensor_msgs::msg::PointCloud2>("/world_pcl", 10);
-			}
+			vis_tracked_powerlines_pub = this->create_publisher<geometry_msgs::msg::PoseArray>("/vis_powerlines_array", 10);
 			
+			hough_line_pub = this->create_publisher<sensor_msgs::msg::Image>("/hough_line_img", 10);
 
+			output_pointcloud_pub = this->create_publisher<sensor_msgs::msg::PointCloud2>("/world_pcl", 10);
 
+			
 			_timer_pl = this->create_wall_timer(33ms, 
 				std::bind(&RadarPCLFilter::update_powerline_poses, this)); //, std::placeholders::_1
 
@@ -1159,9 +1155,7 @@ void RadarPCLFilter::crop_distant_points(pcl::PointCloud<pcl::PointXYZ>::Ptr clo
 
 void RadarPCLFilter::concatenate_poincloud(pcl::PointCloud<pcl::PointXYZ>::Ptr new_points,
 														pcl::PointCloud<pcl::PointXYZ>::Ptr concat_points) {
-// Adds new points 
-	this->get_parameter("leaf_size", _leaf_size);
-
+	// Adds new points 
 	*concat_points += *new_points;
 
 }
@@ -1281,7 +1275,9 @@ void RadarPCLFilter::powerline_detection() {
 
 			RadarPCLFilter::concatenate_poincloud(_concat_cloud, _pl_search_cloud);
 
-			_concat_cloud->clear();		
+			_concat_cloud->clear();	
+
+			RCLCPP_INFO(this->get_logger(), "2");	
 
     	} _concat_cloud_mutex.unlock();
 
@@ -1289,22 +1285,27 @@ void RadarPCLFilter::powerline_detection() {
 		{
 			RadarPCLFilter::crop_distant_points(_pl_search_cloud, _pl_search_cloud);
 
+			RCLCPP_INFO(this->get_logger(), "3");
+
 			if (_voxel_or_time_concat == "voxel")
 			{
 				RadarPCLFilter::downsample_pointcloud(_pl_search_cloud, _pl_search_cloud);
 			} else {
 				RadarPCLFilter::fixed_size_pointcloud(_pl_search_cloud, _pl_search_cloud);
 			}
+
+			RCLCPP_INFO(this->get_logger(), "4");
+
 		}
 
 		since_add_crop_downsample = 0;
 
-		RCLCPP_INFO(this->get_logger(), "2");
+		RCLCPP_INFO(this->get_logger(), "5");
 
 		static Eigen::Vector3f dir_axis;
 		RadarPCLFilter::direction_extraction_2D(_pl_search_cloud, dir_axis);
 
-		RCLCPP_INFO(this->get_logger(), "3");
+		RCLCPP_INFO(this->get_logger(), "6");
 
 		pcl::PointCloud<pcl::PointXYZ>::Ptr extracted_cloud (new pcl::PointCloud<pcl::PointXYZ>);
 		if (_pl_search_cloud->size() > 1)
@@ -1332,7 +1333,7 @@ void RadarPCLFilter::powerline_detection() {
 			}
 				
 		}
-		RCLCPP_INFO(this->get_logger(), "4");
+		RCLCPP_INFO(this->get_logger(), "7");
 	}
 }
 
