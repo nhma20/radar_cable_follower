@@ -123,6 +123,9 @@ class RadarPCLFilter : public rclcpp::Node
 			this->declare_parameter<float>("tracking_update_euclid_dist", 1.5);
 			this->get_parameter("tracking_update_euclid_dist", _tracking_update_euclid_dist);
 
+			this->declare_parameter<int>("launch_with_debug", 1);
+			this->get_parameter("launch_with_debug", _launch_with_debug);
+
 
 			raw_pcl_subscription_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
 			"/iwr6843_pcl",	10,
@@ -225,6 +228,7 @@ class RadarPCLFilter : public rclcpp::Node
 		int _add_crop_downsample_rate;
 		float _tracking_update_ratio;
 		float _tracking_update_euclid_dist;
+		int _launch_with_debug;
 
 		int _t_tries = 0;
 
@@ -496,7 +500,10 @@ void RadarPCLFilter::update_powerline_poses() {
 
 			tracked_powerlines_pub->publish(tracked_powerlines_msg);
 
-			vis_tracked_powerlines_pub->publish(track_pose_array_msg);
+			if (_launch_with_debug > 0)
+			{			
+				vis_tracked_powerlines_pub->publish(track_pose_array_msg);
+			}
 		}
 		
 		
@@ -1087,31 +1094,27 @@ void RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Ptr
 	}
 	// RCLCPP_INFO(this->get_logger(),  "Angle %f:", powerline_2d_angle);
 
-	std::string txt_angle = std::to_string((int)roundf(powerline_2d_angle*DEG_PER_RAD));
-	
-	cv::putText(img, //target image
-            txt_angle, //text
-            cv::Point((img.cols / 2)-15, img.rows-25), //bottom-center position
-            cv::FONT_HERSHEY_DUPLEX,
-            1.0,
-            cv::Scalar(255,255,255), //font color
-            2);
-
-	// static int name_counter = 0;
-	// std::string filename = std::to_string(name_counter++);
-	// std::string extension = ".jpg";
-	// filename = filename + extension;
-	// std::string path = "/home/nm/uzh_ws/ros2_ws/test_folder/";
-	// cv::imwrite( (path+filename), img );
-
 	// update direction axis that is used for 3D parallel line fit
 	dir_axis(0) = cos(powerline_2d_angle);
 	dir_axis(1) = sin(powerline_2d_angle);
 	dir_axis(2) = 0;
 
-	sensor_msgs::msg::Image::SharedPtr msg = cv_bridge::CvImage(std_msgs::msg::Header(), "mono8", img).toImageMsg();
+	if (_launch_with_debug > 0)
+	{	
+		std::string txt_angle = std::to_string((int)roundf(powerline_2d_angle*DEG_PER_RAD));
+	
+		cv::putText(img, //target image
+				txt_angle, //text
+				cv::Point((img.cols / 2)-15, img.rows-25), //bottom-center position
+				cv::FONT_HERSHEY_DUPLEX,
+				1.0,
+				cv::Scalar(255,255,255), //font color
+				2);
 
-	hough_line_pub->publish(*msg.get());
+		sensor_msgs::msg::Image::SharedPtr msg = cv_bridge::CvImage(std_msgs::msg::Header(), "mono8", img).toImageMsg();
+
+		hough_line_pub->publish(*msg.get());
+	}
 
 }
 
@@ -1145,8 +1148,7 @@ void RadarPCLFilter::crop_distant_points(pcl::PointCloud<pcl::PointXYZ>::Ptr clo
 
 void RadarPCLFilter::concatenate_poincloud(pcl::PointCloud<pcl::PointXYZ>::Ptr new_points,
 														pcl::PointCloud<pcl::PointXYZ>::Ptr concat_points) {
-// Adds new points 
-	this->get_parameter("leaf_size", _leaf_size);
+	// Adds new points 
 
 	*concat_points += *new_points;
 
@@ -1254,6 +1256,7 @@ void RadarPCLFilter::read_pointcloud(const sensor_msgs::msg::PointCloud2::Shared
 
 void RadarPCLFilter::powerline_detection() {
 
+	this->get_parameter("launch_with_debug", _launch_with_debug);
 	this->get_parameter("voxel_or_time_concat", _voxel_or_time_concat);
 	this->get_parameter("add_crop_downsample_rate", _add_crop_downsample_rate);
 	
@@ -1304,9 +1307,12 @@ void RadarPCLFilter::powerline_detection() {
 				RCLCPP_INFO(this->get_logger(), "Invalid follow method: %s", _line_or_point_follow);
 			}
 			
-			auto pcl_msg = sensor_msgs::msg::PointCloud2();
-			RadarPCLFilter::create_pointcloud_msg(_pl_search_cloud, &pcl_msg);
-			output_pointcloud_pub->publish(pcl_msg);  
+			if (_launch_with_debug > 0)
+			{	
+				auto pcl_msg = sensor_msgs::msg::PointCloud2();
+				RadarPCLFilter::create_pointcloud_msg(_pl_search_cloud, &pcl_msg);
+				output_pointcloud_pub->publish(pcl_msg);  
+			}
 				
 		}
 	}
