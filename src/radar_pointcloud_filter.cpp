@@ -475,10 +475,12 @@ void RadarPCLFilter::update_powerline_poses() {
 
 				tracked_count++;
 				
-
-				RCLCPP_INFO(this->get_logger(),  "\nPoint %d: \n X %f\n Y %f\n Z %f\n ID %d\n ALIVE %d\n", 
-					i, prev_point_vec.at(i).point(0), prev_point_vec.at(i).point(1), prev_point_vec.at(i).point(2), 
-					prev_point_vec.at(i).id, prev_point_vec.at(i).alive_count);
+				if (_launch_with_debug)
+				{				
+					RCLCPP_INFO(this->get_logger(),  "\nPoint %d: \n X %f\n Y %f\n Z %f\n ID %d\n ALIVE %d\n", 
+						i, prev_point_vec.at(i).point(0), prev_point_vec.at(i).point(1), prev_point_vec.at(i).point(2), 
+						prev_point_vec.at(i).id, prev_point_vec.at(i).alive_count);
+				}
 			
 			
 				auto track_pose_msg = geometry_msgs::msg::Pose();
