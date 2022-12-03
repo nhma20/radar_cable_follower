@@ -30,18 +30,6 @@
  *
  ****************************************************************************/
 
-/**
- * @brief Offboard control example
- * @file offboard_control.cpp
- * @addtogroup examples
- * @author Mickey Cowden <info@cowden.tech>
- * @author Nuno Marques <nuno.marques@dronesolutions.io>
-
- * The TrajectorySetpoint message and the OFFBOARD mode in general are under an ongoing update.
- * Please refer to PR: https://github.com/PX4/PX4-Autopilot/pull/16739 for more info. 
- * As per PR: https://github.com/PX4/PX4-Autopilot/pull/17094, the format
- * of the TrajectorySetpoint message shall change.
- */
 
 #include <px4_msgs/msg/offboard_control_mode.hpp>
 #include <px4_msgs/msg/trajectory_setpoint.hpp>
@@ -406,6 +394,16 @@ void OffboardControl::publish_offboard_control_mode() const {
  *        Should go to align with cable of choice there
  */
 void OffboardControl::publish_tracking_setpoint() {
+
+	if (_alignment_pose.position(0) == 0 && 
+		_alignment_pose.position(1) == 0 && 
+		_alignment_pose.position(2) == 0)
+	{
+		RCLCPP_INFO(this->get_logger(), "Nothing to align with - holding position");
+		OffboardControl::publish_hold_setpoint();
+		return;
+	}
+	
 
 	float pos_frac;
 	this->get_parameter("pos_frac", pos_frac);
