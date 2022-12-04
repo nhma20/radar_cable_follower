@@ -215,7 +215,6 @@ void OffboardControl::flight_state_machine() {
 			RCLCPP_INFO(this->get_logger(), "\n \nOffboard mode enabled\n");
 		}
 
-		publish_offboard_control_mode();
 		publish_hold_setpoint();
 		_old_nav_state = _nav_state;
 		_counter = 0;
@@ -236,7 +235,6 @@ void OffboardControl::flight_state_machine() {
 			takeoff_print = true;
 			RCLCPP_INFO(this->get_logger(), "\n \nTaking off to %f meters\n", _takeoff_height);
 		}
-		publish_offboard_control_mode();
 		publish_takeoff_setpoint();
 		return;
 	}
@@ -245,7 +243,6 @@ void OffboardControl::flight_state_machine() {
 		if(_counter == 10 && _launch_with_debug > 0){
 			RCLCPP_INFO(this->get_logger(), "\n \nBeginning alignment \n");
 		}
-		publish_offboard_control_mode();
 		publish_tracking_setpoint();
 
 		// RCLCPP_INFO(this->get_logger(), "Alignment pose:\n X %f \n Y: %f \n Z: %f",
@@ -545,6 +542,8 @@ void OffboardControl::publish_hold_setpoint() const {
  * and pose message
  */
 void OffboardControl::publish_setpoint(px4_msgs::msg::TrajectorySetpoint msg) const {
+
+	publish_offboard_control_mode();
 
 	orientation_t eul (
 		0.0,
