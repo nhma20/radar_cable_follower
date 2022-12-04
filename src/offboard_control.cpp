@@ -77,7 +77,7 @@ public:
 
 		this->declare_parameter<float>("yaw_frac", 0.25);
 		this->declare_parameter<float>("pos_frac", 0.5);
-		this->declare_parameter<float>("powerline_following_distance", 10.0);
+		this->declare_parameter<float>("powerline_following_distance", 7.5);
 		this->declare_parameter<float>("powerline_following_speed", 0.25);
 		this->declare_parameter<int>("powerline_following_ID", -1);
 
@@ -129,6 +129,9 @@ public:
 
 		timer_ = this->create_wall_timer(100ms, 
 				std::bind(&OffboardControl::flight_state_machine, this));
+
+		_mission_timer = this->create_wall_timer(10000ms, 
+				std::bind(&OffboardControl::mission_state_machine, this));
 		
 	}
 
@@ -147,6 +150,7 @@ public:
 
 private:
 	rclcpp::TimerBase::SharedPtr timer_;
+	rclcpp::TimerBase::SharedPtr _mission_timer;
 
 	rclcpp::Publisher<px4_msgs::msg::OffboardControlMode>::SharedPtr _offboard_control_mode_publisher;
 	rclcpp::Publisher<px4_msgs::msg::TrajectorySetpoint>::SharedPtr _trajectory_setpoint_publisher;
@@ -165,11 +169,15 @@ private:
 	int _arming_state;
 	geometry_msgs::msg::PoseArray::SharedPtr _powerline_array_msg; // auto?
 	int _counter = 0;
+	float _following_distance;
+	float _follow_speed;
 	int _selected_ID = -1;
 	int _launch_with_debug;
 	float _takeoff_height;
 
     bool _printed_offboard = false;
+
+	bool _in_offboard = false;
 
 	std::mutex _id_mutex;
 	std::mutex _drone_pose_mutex;
@@ -181,6 +189,7 @@ private:
 
 	float _hover_height = 2;
 
+	void mission_state_machine();
 	void flight_state_machine();
 	void update_drone_pose();
 	void update_alignment_pose(radar_cable_follower_msgs::msg::TrackedPowerlines::SharedPtr msg);
@@ -194,6 +203,41 @@ private:
 	void world_to_points();
 };
 
+
+void OffboardControl::mission_state_machine() {
+
+	static int callback_count = 0;
+
+	if (! _in_offboard)
+	{
+		return;
+	}
+	
+
+	if (callback_count == 0)
+	{
+		RCLCPP_INFO(this->get_logger(),  "\nOriginal ID, original direction\n");
+	}
+
+	if (callback_count == 1)
+	{
+		this->set_parameter(rclcpp::Parameter("powerline_following_ID", 0));
+		this->set_parameter(rclcpp::Parameter("powerline_following_distance", _following_distance));
+		this->set_parameter(rclcpp::Parameter("powerline_following_speed", -_follow_speed*2));
+		RCLCPP_INFO(this->get_logger(),  "\nNew ID, reversing direction\n");
+	}
+
+	if (callback_count == 2)
+	{
+		this->set_parameter(rclcpp::Parameter("powerline_following_ID", 0));
+		this->set_parameter(rclcpp::Parameter("powerline_following_distance", _following_distance+7.5));
+		this->set_parameter(rclcpp::Parameter("powerline_following_speed", _follow_speed*2));
+		RCLCPP_INFO(this->get_logger(),  "\nGreater distance, increased speed\n");
+	}
+	
+
+	callback_count++;
+}
 
 
 void OffboardControl::flight_state_machine() {
@@ -216,10 +260,13 @@ void OffboardControl::flight_state_machine() {
 		}
 
 		publish_hold_setpoint();
+		_in_offboard = false;
 		_old_nav_state = _nav_state;
 		_counter = 0;
 		return;
 	}
+
+	_in_offboard = true;
 
 	if (!_printed_offboard)
 	{
@@ -329,7 +376,6 @@ void OffboardControl::update_alignment_pose(radar_cable_follower_msgs::msg::Trac
 		}
 	}
 
-	float _following_distance;
 	this->get_parameter("powerline_following_distance", _following_distance);	
 
 	_powerline_mutex.lock(); {	
@@ -408,8 +454,7 @@ void OffboardControl::publish_tracking_setpoint() {
 	float yaw_frac;
 	this->get_parameter("yaw_frac", yaw_frac);
 
-	float follow_speed;
-	this->get_parameter("powerline_following_speed", follow_speed);
+	this->get_parameter("powerline_following_speed", _follow_speed);
 
 	orientation_t target_yaw_eul;
 
@@ -449,7 +494,7 @@ void OffboardControl::publish_tracking_setpoint() {
 	} _powerline_mutex.unlock();
 
 	point_t unit_x(
-		1.0 * follow_speed,
+		1.0 * _follow_speed,
 		0.0,
 		0.0
 	);
