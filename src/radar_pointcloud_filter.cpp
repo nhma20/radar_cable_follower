@@ -1015,18 +1015,39 @@ void RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Ptr
 	// find most popular hough line angle
 	if (tmp_angles.size() > 1)
 	{
-	
 		sort(tmp_angles.begin(), tmp_angles.end());
 
 		std::vector<std::vector<float>> clusters;
 		float eps = (float)pcl::deg2rad((double)15.0);
 		float curr_angle = tmp_angles.at(0);
+
+		int over_85_count = 0;
+		int under_minus_85_count = 0;
+
+		if (curr_angle > 1.48352986)
+		{
+			over_85_count++;
+		}
+		else if (curr_angle < -1.48352986)
+		{
+			under_minus_85_count++;
+		}		
+
 		std::vector<float> curr_cluster;
 		curr_cluster.push_back(curr_angle);
 
 		// divide found hough angles into clusters
 		for (size_t i = 1; i < tmp_angles.size(); i++)
-		{			
+		{		
+			if (tmp_angles.at(i) > 1.48352986) // 85 deg
+			{
+				over_85_count++;
+			}
+			else if (tmp_angles.at(i) < -1.48352986) // -85 deg
+			{
+				under_minus_85_count++;
+			}
+				
 			if( abs(tmp_angles.at(i) - curr_angle) <= eps ) 
 			{
 				curr_cluster.push_back(tmp_angles.at(i));
@@ -1040,18 +1061,69 @@ void RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Ptr
 			curr_angle = tmp_angles.at(i);
 		}
 		clusters.push_back(curr_cluster);
-		
-		// print clusters
-		// RCLCPP_INFO(this->get_logger(),  "Angle values:");
-		for (size_t i = 0; i < clusters.size(); i++)
+
+
+		// if both >85 and <-85 measurements exist, combine into one bin to fix jump
+		if (under_minus_85_count > 0 && over_85_count > 0)
 		{
-			// RCLCPP_INFO(this->get_logger(),  "Cluster %d:", i);
-			for (size_t j = 0; j < clusters.at(i).size(); j++)
+			if (under_minus_85_count > over_85_count)
 			{
-				// RCLCPP_INFO(this->get_logger(),  "%f \t", clusters.at(i).at(j));
+				if(clusters.at((clusters.size()-1)).size() > (size_t)over_85_count)
+				{
+					for (size_t i = 0; i < (size_t)over_85_count; i++)
+					{
+						clusters.at(((int)clusters.size()-1)).erase((clusters.at(((int)clusters.size()-1)).end()-1));
+						clusters.at(0).push_back(-1.56905099754);
+					}
+				} 
+				else
+				{
+					clusters.erase(clusters.end());
+
+					for (int i = 0; i < over_85_count; i++)
+					{
+						clusters.at(0).push_back(-1.56905099754);
+					}
+				}
 			}
-			
+
+			if (under_minus_85_count <= over_85_count)
+			{
+				if(clusters.at(0).size() > (size_t)under_minus_85_count)
+				{
+					for (size_t i = 0; i < (size_t)under_minus_85_count; i++)
+					{
+						clusters.at(0).erase((clusters.at(0).begin()));
+						clusters.at((clusters.size()-1)).push_back(1.56905099754);
+					}
+				} 
+				else
+				{
+					clusters.erase(clusters.begin());
+
+					for (int i = 0; i < under_minus_85_count; i++)
+					{
+						clusters.at((clusters.size()-1)).push_back(1.56905099754);
+					}
+				}
+			}
 		}
+		
+		
+		// // print clusters
+		// RCLCPP_INFO(this->get_logger(),  "Angle values:");
+		// for (size_t i = 0; i < clusters.size(); i++)
+		// {
+		// 	RCLCPP_INFO(this->get_logger(),  "Cluster %d:", i);
+		// 	for (size_t j = 0; j < clusters.at(i).size(); j++)
+		// 	{
+		// 		RCLCPP_INFO(this->get_logger(),  "%f \t", clusters.at(i).at(j));
+		// 	}
+		// }
+
+		// RCLCPP_INFO(this->get_logger(),  "over 85: %d", over_85_count);
+		// RCLCPP_INFO(this->get_logger(),  "under -85: %d", under_minus_85_count);
+
 
 		// find biggest cluster
 		int biggest_cluster = -1;
@@ -1074,6 +1146,7 @@ void RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Ptr
 			}
 		}
 
+
 		if (biggest_cluster == second_biggest_cluster || biggest_cluster_idx < 0)
 		{
 			// empty or tie, no clear hough direction = keep previous powerline angle
@@ -1091,14 +1164,9 @@ void RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Ptr
 			}
 
 			powerline_2d_angle = sum / count;
-
-
-			// RCLCPP_INFO(this->get_logger(),  "Sum %f:", sum);
-			// RCLCPP_INFO(this->get_logger(),  "Count %f:", count);
 		}
-		
 	}
-	// RCLCPP_INFO(this->get_logger(),  "Angle %f:", powerline_2d_angle);
+
 
 	// update direction axis that is used for 3D parallel line fit
 	dir_axis(0) = cos(powerline_2d_angle);
@@ -1121,7 +1189,6 @@ void RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Ptr
 
 		hough_line_pub->publish(*msg.get());
 	}
-
 }
 
 void RadarPCLFilter::crop_distant_points(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
