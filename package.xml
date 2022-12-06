@@ -20,6 +20,7 @@
   <depend>image_transport</depend>
   <depend>cv_bridge</depend>
   <depend>radar_cable_follower_msgs</depend>
+  <depend>iwr6843isk_pub</depend>
 
 
 
