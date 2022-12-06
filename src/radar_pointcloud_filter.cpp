@@ -1,10 +1,10 @@
 // ROS2 includes
 #include <rclcpp/rclcpp.hpp>
-#include <rclcpp/qos.hpp>
+// #include <rclcpp/qos.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/msg/point_field.hpp>
 #include <geometry_msgs/msg/pose.hpp>
-#include <geometry_msgs/msg/pose_stamped.hpp>
+// #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/pose_array.hpp>
 #include <px4_msgs/msg/vehicle_odometry.hpp>
 #include <tf2_ros/transform_listener.h>
@@ -17,15 +17,15 @@
 
 
  // MISC includes
-#include <algorithm>
+// #include <algorithm>
 #include <cstdlib>
 #include <stdlib.h> 
-#include <iostream>
+// #include <iostream>
 #include <chrono>
-#include <ctime>    
+// #include <ctime>    
 #include <math.h> 
 #include <cmath> 
-#include <limits>
+// #include <limits>
 #include <vector>
 #include <deque>
 #include <string>
@@ -38,29 +38,29 @@
 #include <pcl/point_cloud.h>
 #include <pcl/common/transforms.h>
 #include <pcl/common/angles.h>
-#include <pcl/io/pcd_io.h>
+// #include <pcl/io/pcd_io.h>
 #include <pcl/filters/extract_indices.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/crop_box.h>
 #include <pcl/filters/statistical_outlier_removal.h>
-#include <pcl/features/normal_3d.h>
-#include <pcl/search/kdtree.h>
+// #include <pcl/features/normal_3d.h>
+// #include <pcl/search/kdtree.h>
 #include <pcl/sample_consensus/method_types.h>
 #include <pcl/sample_consensus/model_types.h>
 #include <pcl/sample_consensus/ransac.h>
 #include <pcl/sample_consensus/sac_model_line.h>
 #include <pcl/segmentation/sac_segmentation.h>
-#include <pcl/segmentation/extract_clusters.h>
+// #include <pcl/segmentation/extract_clusters.h>
 
 
-#include "opencv2/imgcodecs.hpp"
-#include "opencv2/highgui.hpp"
-#include "opencv2/imgproc.hpp"
+// #include "opencv2/imgcodecs.hpp"
+// #include "opencv2/highgui.hpp"
+// #include "opencv2/imgproc.hpp"
 // #include "opencv2/core/hal/interface.hpp"
 
 
 
-#define DEG_PER_RAD 57.296
+#define DEG_PER_RAD 57.2957795
 #define PI 3.14159265
 
 using namespace std::chrono_literals;
@@ -133,8 +133,6 @@ class RadarPCLFilter : public rclcpp::Node
 
 			output_pointcloud_pub = this->create_publisher<sensor_msgs::msg::PointCloud2>("/world_pcl", 10);
 
-			pl_direction_pub = this->create_publisher<geometry_msgs::msg::PoseStamped>("/powerline_direction", 10);
-
 			hough_line_pub = this->create_publisher<sensor_msgs::msg::Image>("/hough_line_img", 10);
 			
 			vis_tracked_powerlines_pub = this->create_publisher<geometry_msgs::msg::PoseArray>("/vis_powerlines_array", 10);
@@ -200,7 +198,6 @@ class RadarPCLFilter : public rclcpp::Node
 		rclcpp::TimerBase::SharedPtr _timer_pcl;
 
 		rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr output_pointcloud_pub;
-		rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pl_direction_pub;
 		rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr hough_line_pub;
 		rclcpp::Publisher<radar_cable_follower_msgs::msg::TrackedPowerlines>::SharedPtr tracked_powerlines_pub;
 		rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr vis_tracked_powerlines_pub;
@@ -928,25 +925,32 @@ void RadarPCLFilter::direction_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cl
 
 		quat_t yaw_quat = eulToQuat(yaw_eul);
 
-		auto pose_msg = geometry_msgs::msg::PoseStamped();
 
-		pose_msg.header = std_msgs::msg::Header();
-		pose_msg.header.stamp = this->now();
-		pose_msg.header.frame_id = "world";
-		pose_msg.pose.orientation.x = yaw_quat(0);
-		pose_msg.pose.orientation.y = yaw_quat(1);
-		pose_msg.pose.orientation.z = yaw_quat(2);
-		pose_msg.pose.orientation.w = yaw_quat(3);
+		auto track_pose_array_msg = geometry_msgs::msg::PoseArray();
+		track_pose_array_msg.header = std_msgs::msg::Header();
+		track_pose_array_msg.header.stamp = this->now();
+		track_pose_array_msg.header.frame_id = "world";
+
+		auto track_pose_msg = geometry_msgs::msg::Pose();
+		track_pose_msg.orientation.x = yaw_quat(0);
+		track_pose_msg.orientation.y = yaw_quat(1);
+		track_pose_msg.orientation.z = yaw_quat(2);
+		track_pose_msg.orientation.w = yaw_quat(3);
 
 		_drone_xyz_mutex.lock(); {
 
-			pose_msg.pose.position.x = _t_xyz(0);
-			pose_msg.pose.position.y = _t_xyz(1);
-			pose_msg.pose.position.z = _t_xyz(2);
+			track_pose_msg.position.x = _t_xyz(0);
+			track_pose_msg.position.y = _t_xyz(1);
+			track_pose_msg.position.z = _t_xyz(2);
 			
 		} _drone_xyz_mutex.unlock();
+		
+		track_pose_array_msg.poses.push_back(track_pose_msg);
 
-		pl_direction_pub->publish(pose_msg);
+		if (_launch_with_debug > 0)
+		{			
+			vis_tracked_powerlines_pub->publish(track_pose_array_msg);
+		}
 
 	}	
 }
@@ -1324,7 +1328,6 @@ void RadarPCLFilter::powerline_detection() {
 			
 int main(int argc, char *argv[])
 {
-	std::cout << "Starting radar_pcl_filter_node..." << std::endl;
 	setvbuf(stdout, NULL, _IONBF, BUFSIZ);
 	rclcpp::init(argc, argv);
 	rclcpp::spin(std::make_shared<RadarPCLFilter>());
