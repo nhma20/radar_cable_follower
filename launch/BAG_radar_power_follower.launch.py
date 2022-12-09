@@ -10,7 +10,8 @@ def generate_launch_description():
     tf_drone_to_iwr = Node(
         package="tf2_ros",
         executable="static_transform_publisher",
-        arguments=["0", "0", "0.05", "0", "0", "1.5", "drone", "iwr6843_frame"] # Simulation (x, y, z, yaw, pitch, roll)
+        #arguments=["0", "0", "0.05", "0", "0", "1.5", "drone", "iwr6843_frame"] # Simulation (x, y, z, yaw, pitch, roll)
+        arguments=["0", "0.0", "-0.08", "1.570796", "0.0", "-1.570796", "drone", "iwr6843_frame"] # Simulation (x, y, z, yaw, roll, pitch)
     )
 
     tf_drone_to_mmwave = Node(
@@ -43,7 +44,7 @@ def generate_launch_description():
     return LaunchDescription([
         tf_drone_to_iwr,
         world_to_drone,
-        lidar_to_mmwave,
+        #lidar_to_mmwave,
         tf_drone_to_mmwave,
         radar_pointcloud_filter,
         offboard_control

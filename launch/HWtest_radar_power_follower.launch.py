@@ -23,7 +23,7 @@ def generate_launch_description():
         package="iwr6843isk_pub",
         executable="pcl_pub",
         parameters=[
-            {'cfg_path': '/home/nm/uzh_ws/ros2_ws/src/iwr6843isk_ros2/cfg_files/xwr68xx_profile_25Hz_Elev_43m.cfg'},
+            {'cfg_path': '/home/ubuntu/ros2_ws/src/iwr6843isk_ros2/cfg_files/xwr68xx_profile_25Hz_Elev_43m.cfg'},
             {'cli_port': '/dev/ttyUSB0'},
             {'data_port': '/dev/ttyUSB1'}
          ]
