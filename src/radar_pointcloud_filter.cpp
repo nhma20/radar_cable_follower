@@ -301,6 +301,9 @@ class RadarPCLFilter : public rclcpp::Node
 		void direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
 										Eigen::Vector3f &dir_axis);
 
+		void direction_extraction_25D(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in, 
+												Eigen::Vector3f &dir_axis);
+
 		void direction_extraction_3D(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in, 
 												Eigen::Vector3f &dir_axis);
 
@@ -991,11 +994,6 @@ void RadarPCLFilter::direction_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cl
 void RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in, 
 												Eigen::Vector3f &dir_axis) {
 
-	
-	RadarPCLFilter::direction_extraction_3D(cloud_in, dir_axis);
-
-
-
 
 	int img_size = _cluster_crop_radius*10*2;
 	cv::Mat img(img_size, img_size, CV_8UC1, cv::Scalar(0));
@@ -1260,11 +1258,14 @@ void RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Ptr
 	}
 }
 
-void RadarPCLFilter::direction_extraction_3D(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in, 
+void RadarPCLFilter::direction_extraction_25D(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in, 
 												Eigen::Vector3f &dir_axis) {
 
-	pcl::KdTreeFLANN<pcl::PointXYZ> kdtree;
-	kdtree.setInputCloud (cloud_in);
+	if (cloud_in->size() < 1)
+	{
+		return;
+	}
+	
 
 	pcl::RandomSample<pcl::PointXYZ> sampler;
 	sampler.setInputCloud (cloud_in);
@@ -1273,26 +1274,655 @@ void RadarPCLFilter::direction_extraction_3D(pcl::PointCloud<pcl::PointXYZ>::Ptr
 	pcl::PointCloud<pcl::PointXYZ>::Ptr sample_cloud(new pcl::PointCloud<pcl::PointXYZ>);
 	sampler.filter(*sample_cloud);
 
+	std::vector<float> z_coords;
+
+	RCLCPP_INFO(this->get_logger(),  "Z vals:");
+	for (size_t i = 0; i < sample_cloud->size(); i++)
+	{
+		// RCLCPP_INFO(this->get_logger(), "\n\nSearch point:\nX: %f\nY: %f\nZ: %f\n", searchPoint.x , searchPoint.y, searchPoint.z);
+
+		// int z_coord = (int)round(sample_cloud->at(i).z*10);
+		// RCLCPP_INFO(this->get_logger(), "%d", z_coord);
+
+		z_coords.push_back(sample_cloud->at(i).z);
+	}
+
+	sort(z_coords.begin(), z_coords.end());
+
+	std::vector<std::vector<float>> clusters;
+	static float eps = 0.25; // threshold between bins
+	float curr_angle = z_coords.at(0);
+
+	std::vector<float> curr_cluster;
+	curr_cluster.push_back(curr_angle);
+
+	// divide found hough angles into clusters
+	for (size_t i = 1; i < z_coords.size(); i++)
+	{				
+		if( abs(z_coords.at(i) - curr_angle) <= eps ) 
+		{
+			curr_cluster.push_back(z_coords.at(i));
+		} 
+		else 
+		{
+			clusters.push_back(curr_cluster);
+			curr_cluster.clear();
+			curr_cluster.push_back(z_coords.at(i));
+		}
+		curr_angle = z_coords.at(i);
+	}
+	clusters.push_back(curr_cluster);
+
+		
+	// print clusters
+	RCLCPP_INFO(this->get_logger(),  "Angle values:");
+	for (size_t i = 0; i < clusters.size(); i++)
+	{
+		RCLCPP_INFO(this->get_logger(),  "Cluster %d:", i);
+		for (size_t j = 0; j < clusters.at(i).size(); j++)
+		{
+			RCLCPP_INFO(this->get_logger(),  "%f \t", clusters.at(i).at(j));
+		}
+	}
+
+
+	// find biggest cluster
+	int highest_cluster = -1;
+	int highest_cluster_idx = -1;
+	float highest_z = -1;
+	// int second_biggest_cluster = -2;
+	for (size_t i = 0; i < clusters.size(); i++)
+	{
+		if ((int)clusters.at(i).size() > 2 && clusters.at(i).at(clusters.at(i).size()-1) > highest_z)
+		{
+			highest_cluster = (int)clusters.at(i).size();
+			highest_cluster_idx = (int)i;
+			highest_z = clusters.at(i).at(clusters.at(i).size()-1);
+		}
+	}
+
+	// average heighest cluster
+	float count = (float)clusters.at(highest_cluster_idx).size();
+	float sum = 0.0;
+	static float avg_height = 0.0;
+
+	for (size_t i = 0; i < clusters.at(highest_cluster_idx).size(); i++)
+	{
+		sum += clusters.at(highest_cluster_idx).at(i);
+	}
+	// avg_height = 0.8*avg_height + 0.2*(sum / count); // simple low pass filter
+	avg_height = sum / count;
+	RCLCPP_INFO(this->get_logger(),  "Highest cluster: %d", highest_cluster_idx);
+	RCLCPP_INFO(this->get_logger(),  "Highest cluster size: %d", highest_cluster);
+	RCLCPP_INFO(this->get_logger(),  "Highest cluster height: %f", avg_height);
+
+	float minX = -10000;
+	float minY = -10000;
+	float maxX = 10000;
+	float maxY = 10000;
+
+	pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_cropped(new pcl::PointCloud<pcl::PointXYZ>);
+	pcl::CropBox<pcl::PointXYZ> boxFilter;
+	boxFilter.setMin(Eigen::Vector4f(minX, minY, -1000, 1.0));
+	boxFilter.setMax(Eigen::Vector4f(maxX, maxY, (avg_height-1), 1.0));
+	boxFilter.setInputCloud(cloud_in);
+	boxFilter.setNegative(true);
+	boxFilter.filter(*cloud_cropped);
+
+	boxFilter.setMin(Eigen::Vector4f(minX, minY, (avg_height+1), 1.0));
+	boxFilter.setMax(Eigen::Vector4f(maxX, maxY, 1000, 1.0));
+	boxFilter.setInputCloud(cloud_cropped);
+	boxFilter.setNegative(true);
+	boxFilter.filter(*cloud_cropped);
+
+	
+	int img_size = _cluster_crop_radius*10*2;
+	cv::Mat img(img_size, img_size, CV_8UC1, cv::Scalar(0));
+
+	this->get_parameter("hough_pixel_diameter", _hough_pixel_size);
+
+	// project point cloud onto ground and create mat from points
+	for (size_t i = 0; i < cloud_cropped->size(); i++)
+	{
+		pcl::PointXYZ point = (*cloud_cropped)[i];
+
+		float y_tmp;
+		float x_tmp;
+
+		// x and y swapped to align image with world x y (up = +x, left = +y)
+		_drone_xyz_mutex.lock(); {
+			y_tmp = roundf( img_size/2 - 10.0*(point.x - _t_xyz(0)) );
+			x_tmp = roundf( img_size/2 - 10.0*(point.y - _t_xyz(1)) );
+		} _drone_xyz_mutex.unlock();
+
+		if (_hough_pixel_size > 1)
+		{
+			cv::circle(img, cv::Point(x_tmp,y_tmp),round(_hough_pixel_size/2), cv::Scalar(255,255,255), -1, 8,0);
+		}
+		else
+		{
+			img.at<uchar>(y_tmp, x_tmp) = 255;
+		}
+	}
+
+
+
+	// Probabilistic Line Transform
+    std::vector<cv::Vec4i> linesP; // will hold the results of the detection
+	std::vector<float> tmp_angles;
+
+	this->get_parameter("hough_rho", _hough_rho);
+	this->get_parameter("hough_theta", _hough_theta);
+	this->get_parameter("hough_minimum_inliers", _hough_minimum_inliers);
+	this->get_parameter("hough_maximum_gap", _hough_maximum_gap);
+	this->get_parameter("hough_minimum_length", _hough_minimum_length);
+
+	// cv::GaussianBlur(img, img, cv::Size(9, 9), 2, 2 );
+    cv::HoughLinesP(img, linesP, _hough_rho, _hough_theta, _hough_minimum_inliers, _hough_maximum_gap, _hough_minimum_length); // rho res pixels, theta res rads, min intersections, min line length, max line gap
+    
+	float tmp_pl_world_yaw = -0.0;
+
+    for( size_t i = 0; i < linesP.size(); i++ )
+    {
+        cv::Vec4i l = linesP[i];
+		// Draw the lines
+        cv::line( img, cv::Point(l[0], l[1]), cv::Point(l[2], l[3]), cv::Scalar(127,127,127), 2, cv::LINE_AA);
+
+		// calculate angle (+-90 deg around world X-axis)
+		float diff_x = (float)l[0] - (float)l[2];
+		float diff_y = (float)l[3] - (float)l[1];
+
+		float tmp_atan2_swapped = atan2f(diff_x, diff_y); // args swapped to rot 90deg
+
+		// flip sign to align with right hand rule direction
+		tmp_pl_world_yaw = -1 * tmp_atan2_swapped;
+		
+		// flip angle if outside +-90 deg range
+		if (tmp_pl_world_yaw > PI/2)
+		{
+			tmp_pl_world_yaw = tmp_pl_world_yaw - PI;
+		}
+		else if (tmp_pl_world_yaw < -PI/2)
+		{
+			tmp_pl_world_yaw = tmp_pl_world_yaw + PI;
+		}
+
+		// check if angle value is broken
+		if (isnan(tmp_pl_world_yaw) || tmp_pl_world_yaw == 0.0 || tmp_pl_world_yaw != tmp_pl_world_yaw)
+		{
+			continue;
+		}
+
+
+		tmp_angles.push_back(tmp_pl_world_yaw);
+	}
+
+	// RCLCPP_INFO(this->get_logger(),  "Angles: %d\n", tmp_angles.size());
+
+	static float powerline_2d_angle = 0.0; 
+
+	// find most popular hough line angle
+	if (tmp_angles.size() > 1)
+	{
+		this->get_parameter("2d_direction_bin_threshold", _2d_direction_bin_threshold);
+
+		sort(tmp_angles.begin(), tmp_angles.end());
+
+		std::vector<std::vector<float>> clusters;
+		static float eps = (float)pcl::deg2rad((double)_2d_direction_bin_threshold); // threshold between bins
+		float curr_angle = tmp_angles.at(0);
+
+		int over_85_count = 0;
+		int under_minus_85_count = 0;
+
+		if (curr_angle > 1.48352986)
+		{
+			over_85_count++;
+		}
+		else if (curr_angle < -1.48352986)
+		{
+			under_minus_85_count++;
+		}		
+
+		std::vector<float> curr_cluster;
+		curr_cluster.push_back(curr_angle);
+
+		// divide found hough angles into clusters
+		for (size_t i = 1; i < tmp_angles.size(); i++)
+		{		
+			if (tmp_angles.at(i) > 1.48352986) // 85 deg
+			{
+				over_85_count++;
+			}
+			else if (tmp_angles.at(i) < -1.48352986) // -85 deg
+			{
+				under_minus_85_count++;
+			}
+				
+			if( abs(tmp_angles.at(i) - curr_angle) <= eps ) 
+			{
+				curr_cluster.push_back(tmp_angles.at(i));
+			} 
+			else 
+			{
+				clusters.push_back(curr_cluster);
+				curr_cluster.clear();
+				curr_cluster.push_back(tmp_angles.at(i));
+			}
+			curr_angle = tmp_angles.at(i);
+		}
+		clusters.push_back(curr_cluster);
+
+
+		// if both >85 and <-85 measurements exist, combine into one bin to fix jump
+		if (under_minus_85_count > 0 && over_85_count > 0)
+		{
+			if (under_minus_85_count > over_85_count)
+			{
+				if(clusters.at((clusters.size()-1)).size() > (size_t)over_85_count)
+				{
+					for (size_t i = 0; i < (size_t)over_85_count; i++)
+					{
+						clusters.at(((int)clusters.size()-1)).erase((clusters.at(((int)clusters.size()-1)).end()-1));
+						clusters.at(0).push_back(-1.56905099754); // -89.99 deg
+					}
+				} 
+				else
+				{
+					clusters.erase(clusters.end());
+
+					for (int i = 0; i < over_85_count; i++)
+					{
+						clusters.at(0).push_back(-1.56905099754); // -89.99 deg
+					}
+				}
+			}
+
+			if (under_minus_85_count <= over_85_count)
+			{
+				if(clusters.at(0).size() > (size_t)under_minus_85_count)
+				{
+					for (size_t i = 0; i < (size_t)under_minus_85_count; i++)
+					{
+						clusters.at(0).erase((clusters.at(0).begin()));
+						clusters.at((clusters.size()-1)).push_back(1.56905099754); // 89.99 deg
+					}
+				} 
+				else
+				{
+					clusters.erase(clusters.begin());
+
+					for (int i = 0; i < under_minus_85_count; i++)
+					{
+						clusters.at((clusters.size()-1)).push_back(1.56905099754); // 89.99 deg
+					}
+				}
+			}
+		}
+		
+		
+		// print clusters
+		RCLCPP_INFO(this->get_logger(),  "Angle values:");
+		for (size_t i = 0; i < clusters.size(); i++)
+		{
+			RCLCPP_INFO(this->get_logger(),  "Cluster %d:", i);
+			for (size_t j = 0; j < clusters.at(i).size(); j++)
+			{
+				RCLCPP_INFO(this->get_logger(),  "%f \t", clusters.at(i).at(j));
+			}
+		}
+		RCLCPP_INFO(this->get_logger(),  "over 85: %d", over_85_count);
+		RCLCPP_INFO(this->get_logger(),  "under -85: %d", under_minus_85_count);
+
+
+		// find biggest cluster
+		int biggest_cluster = -1;
+		int biggest_cluster_idx = -1;
+		int second_biggest_cluster = -2;
+		for (size_t i = 0; i < clusters.size(); i++)
+		{
+
+			if ((int)clusters.at(i).size() > biggest_cluster)
+			{
+				biggest_cluster = (int)clusters.at(i).size();
+				biggest_cluster_idx = (int)i;
+			}
+			else 
+			{
+				if ((int)clusters.at(i).size() > second_biggest_cluster)
+				{
+					second_biggest_cluster = (int)clusters.at(i).size();
+				}
+			}
+		}
+
+
+		if (biggest_cluster == second_biggest_cluster || biggest_cluster_idx < 0)
+		{
+			// empty or tie, no clear hough direction = keep previous powerline angle
+			powerline_2d_angle = powerline_2d_angle;
+		}
+		else
+		{
+			// average cluster with most votes
+			float count = (float)clusters.at(biggest_cluster_idx).size();
+			float sum = 0.0;
+
+			for (size_t i = 0; i < clusters.at(biggest_cluster_idx).size(); i++)
+			{
+				sum += clusters.at(biggest_cluster_idx).at(i);
+			}
+
+			powerline_2d_angle = 0.8*powerline_2d_angle + 0.2*(sum / count); // simple low pass filter
+		}
+	}
+
+
+	// update direction axis that is used for 3D parallel line fit
+	dir_axis(0) = cos(powerline_2d_angle);
+	dir_axis(1) = sin(powerline_2d_angle);
+	dir_axis(2) = 0;
+
+	if (_launch_with_debug > 0)
+	{	
+		std::string txt_angle = std::to_string((int)roundf(powerline_2d_angle*DEG_PER_RAD))+"*";
+	
+		cv::putText(img, //target image
+				txt_angle, //text
+				cv::Point((img.cols / 2)-15, img.rows-25), //bottom-center position
+				cv::FONT_HERSHEY_DUPLEX,
+				1.0,
+				cv::Scalar(255,255,255), //font color
+				2);
+
+		sensor_msgs::msg::Image::SharedPtr msg = cv_bridge::CvImage(std_msgs::msg::Header(), "mono8", img).toImageMsg();
+
+		hough_line_pub->publish(*msg.get());
+	}
+}
+
+
+void RadarPCLFilter::direction_extraction_3D(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in, 
+												Eigen::Vector3f &dir_axis) {
+
+	if (cloud_in->size() < 1)
+	{
+		return;
+	}
+	
+
+	int img_size = _cluster_crop_radius*10*2;
+	cv::Mat img(img_size, img_size, CV_8UC1, cv::Scalar(0));
+
+	this->get_parameter("hough_pixel_diameter", _hough_pixel_size);
+
+	// project point cloud onto ground and create mat from points
+	for (size_t i = 0; i < cloud_in->size(); i++)
+	{
+		pcl::PointXYZ point = (*cloud_in)[i];
+
+		float y_tmp;
+		float x_tmp;
+
+		// x and y swapped to align image with world x y (up = +x, left = +y)
+		_drone_xyz_mutex.lock(); {
+			y_tmp = roundf( img_size/2 - 10.0*(point.x - _t_xyz(0)) );
+			x_tmp = roundf( img_size/2 - 10.0*(point.y - _t_xyz(1)) );
+		} _drone_xyz_mutex.unlock();
+
+		if (_hough_pixel_size > 1)
+		{
+			cv::circle(img, cv::Point(x_tmp,y_tmp),round(_hough_pixel_size/2), cv::Scalar(255,255,255), -1, 8,0);
+		}
+		else
+		{
+			img.at<uchar>(y_tmp, x_tmp) = 255;
+		}
+	}
+
+	pcl::KdTreeFLANN<pcl::PointXYZ> kdtree;
+	kdtree.setInputCloud (cloud_in);
+
+	pcl::RandomSample<pcl::PointXYZ> sampler;
+	sampler.setInputCloud (cloud_in);
+	sampler.setSeed (std::rand ());
+	sampler.setSample((unsigned int)(10000));
+	pcl::PointCloud<pcl::PointXYZ>::Ptr sample_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+	sampler.filter(*sample_cloud);
+
+	std::vector<float> tmp_angles;
+	float tmp_pl_world_yaw = -0.0;
+
+	RCLCPP_INFO(this->get_logger(),  "Atan2:");
 	for (size_t i = 0; i < sample_cloud->size(); i++)
 	{
 		pcl::PointXYZ searchPoint = sample_cloud->at(i);
 
-		RCLCPP_INFO(this->get_logger(), "\n\nSearch point:\nX: %f\nY: %f\nZ: %f\n", searchPoint.x , searchPoint.y, searchPoint.z);
-
-		int K = 1;
+		// RCLCPP_INFO(this->get_logger(), "\n\nSearch point:\nX: %f\nY: %f\nZ: %f\n", searchPoint.x , searchPoint.y, searchPoint.z);
+		int K = 2;
 
 		std::vector<int> pointIdxKNNSearch(K);
 		std::vector<float> pointKNNSquaredDistance(K);
 
 		if ( kdtree.nearestKSearch (searchPoint, K, pointIdxKNNSearch, pointKNNSquaredDistance) > 0 )
 		{
-		for (std::size_t i = 0; i < pointIdxKNNSearch.size (); ++i)
-			RCLCPP_INFO(this->get_logger(), "\n\nNeighbour point:\nX: %f\nY: %f\nZ: %f\nSquared dist: %f\n", 
-				(*cloud_in)[ pointIdxKNNSearch[i] ].x , 
-				(*cloud_in)[ pointIdxKNNSearch[i] ].y , 
-				(*cloud_in)[ pointIdxKNNSearch[i] ].z ,
-				pointKNNSquaredDistance[i]);
+			float orig_x = sample_cloud->at(i).x;
+			float orig_y = sample_cloud->at(i).y;
+
+			float nn_x = (*cloud_in)[ pointIdxKNNSearch[1] ].x;
+			float nn_y = (*cloud_in)[ pointIdxKNNSearch[1] ].y;
+
+			// calculate angle (+-90 deg around world X-axis)
+			float diff_x = orig_x - nn_x; //(float)l[0] - (float)l[2];
+			float diff_y = orig_y - nn_y; //(float)l[3] - (float)l[1];
+
+			float tmp_atan2 = atan2f(diff_y, diff_x);
+			RCLCPP_INFO(this->get_logger(),  "%f", tmp_atan2);
+
+			float tmp_atan2_swapped = atan2f(diff_x, diff_y); // args swapped to rot 90deg
+
+
+			// flip sign to align with right hand rule direction
+			tmp_pl_world_yaw = -1 * tmp_atan2_swapped;
+			
+			// flip angle if outside +-90 deg range
+			if (tmp_pl_world_yaw > PI/2)
+			{
+				tmp_pl_world_yaw = tmp_pl_world_yaw - PI;
+			}
+			else if (tmp_pl_world_yaw < -PI/2)
+			{
+				tmp_pl_world_yaw = tmp_pl_world_yaw + PI;
+			}
+
+
+			// check if angle value is broken
+			if (isnan(tmp_pl_world_yaw) || tmp_pl_world_yaw == 0.0 || tmp_pl_world_yaw != tmp_pl_world_yaw)
+			{
+				continue;
+			}
+
+			tmp_angles.push_back(tmp_pl_world_yaw);
 		}
+	}
+
+	// RCLCPP_INFO(this->get_logger(),  "Angles: %d\n", tmp_angles.size());
+
+	static float powerline_2d_angle = 0.0; 
+
+	// find most popular hough line angle
+	if (tmp_angles.size() > 1)
+	{
+		this->get_parameter("2d_direction_bin_threshold", _2d_direction_bin_threshold);
+
+		sort(tmp_angles.begin(), tmp_angles.end());
+
+		std::vector<std::vector<float>> clusters;
+		static float eps = (float)pcl::deg2rad((double)_2d_direction_bin_threshold); // threshold between bins
+		float curr_angle = tmp_angles.at(0);
+
+		int over_85_count = 0;
+		int under_minus_85_count = 0;
+
+		if (curr_angle > 1.48352986)
+		{
+			over_85_count++;
+		}
+		else if (curr_angle < -1.48352986)
+		{
+			under_minus_85_count++;
+		}		
+
+		std::vector<float> curr_cluster;
+		curr_cluster.push_back(curr_angle);
+
+		// divide found hough angles into clusters
+		for (size_t i = 1; i < tmp_angles.size(); i++)
+		{		
+			if (tmp_angles.at(i) > 1.48352986) // 85 deg
+			{
+				over_85_count++;
+			}
+			else if (tmp_angles.at(i) < -1.48352986) // -85 deg
+			{
+				under_minus_85_count++;
+			}
+				
+			if( abs(tmp_angles.at(i) - curr_angle) <= eps ) 
+			{
+				curr_cluster.push_back(tmp_angles.at(i));
+			} 
+			else 
+			{
+				clusters.push_back(curr_cluster);
+				curr_cluster.clear();
+				curr_cluster.push_back(tmp_angles.at(i));
+			}
+			curr_angle = tmp_angles.at(i);
+		}
+		clusters.push_back(curr_cluster);
+
+		// if both >85 and <-85 measurements exist, combine into one bin to fix jump
+		if (under_minus_85_count > 0 && over_85_count > 0)
+		{
+			if (under_minus_85_count > over_85_count)
+			{
+				if(clusters.at((clusters.size()-1)).size() > (size_t)over_85_count)
+				{
+					for (size_t i = 0; i < (size_t)over_85_count; i++)
+					{
+						clusters.at(((int)clusters.size()-1)).erase((clusters.at(((int)clusters.size()-1)).end()-1));
+						clusters.at(0).push_back(-1.56905099754); // -89.99 deg
+					}
+				} 
+				else
+				{
+					clusters.erase(clusters.end());
+
+					for (int i = 0; i < over_85_count; i++)
+					{
+						clusters.at(0).push_back(-1.56905099754); // -89.99 deg
+					}
+				}
+			}
+
+			if (under_minus_85_count <= over_85_count)
+			{
+				if(clusters.at(0).size() > (size_t)under_minus_85_count)
+				{
+					for (size_t i = 0; i < (size_t)under_minus_85_count; i++)
+					{
+						clusters.at(0).erase((clusters.at(0).begin()));
+						clusters.at((clusters.size()-1)).push_back(1.56905099754); // 89.99 deg
+					}
+				} 
+				else
+				{
+					clusters.erase(clusters.begin());
+
+					for (int i = 0; i < under_minus_85_count; i++)
+					{
+						clusters.at((clusters.size()-1)).push_back(1.56905099754); // 89.99 deg
+					}
+				}
+			}
+		}
+				
+		// print clusters
+		// RCLCPP_INFO(this->get_logger(),  "Angle values:");
+		// for (size_t i = 0; i < clusters.size(); i++)
+		// {
+		// 	RCLCPP_INFO(this->get_logger(),  "Cluster %d:", i);
+		// 	for (size_t j = 0; j < clusters.at(i).size(); j++)
+		// 	{
+		// 		RCLCPP_INFO(this->get_logger(),  "%f \t", clusters.at(i).at(j));
+		// 	}
+		// }
+		// RCLCPP_INFO(this->get_logger(),  "over 85: %d", over_85_count);
+		// RCLCPP_INFO(this->get_logger(),  "under -85: %d", under_minus_85_count);
+
+
+		// find biggest cluster
+		int biggest_cluster = -1;
+		int biggest_cluster_idx = -1;
+		int second_biggest_cluster = -2;
+		for (size_t i = 0; i < clusters.size(); i++)
+		{
+
+			if ((int)clusters.at(i).size() > biggest_cluster)
+			{
+				biggest_cluster = (int)clusters.at(i).size();
+				biggest_cluster_idx = (int)i;
+			}
+			else 
+			{
+				if ((int)clusters.at(i).size() > second_biggest_cluster)
+				{
+					second_biggest_cluster = (int)clusters.at(i).size();
+				}
+			}
+		}
+
+		if (biggest_cluster == second_biggest_cluster || biggest_cluster_idx < 0)
+		{
+			// empty or tie, no clear hough direction = keep previous powerline angle
+			powerline_2d_angle = powerline_2d_angle;
+		}
+		else
+		{
+			// average cluster with most votes
+			float count = (float)clusters.at(biggest_cluster_idx).size();
+			float sum = 0.0;
+
+			for (size_t i = 0; i < clusters.at(biggest_cluster_idx).size(); i++)
+			{
+				sum += clusters.at(biggest_cluster_idx).at(i);
+			}
+
+			powerline_2d_angle = 0.8*powerline_2d_angle + 0.2*(sum / count); // simple low pass filter
+		}
+	}
+
+	// update direction axis that is used for 3D parallel line fit
+	dir_axis(0) = cos(powerline_2d_angle);
+	dir_axis(1) = sin(powerline_2d_angle);
+	dir_axis(2) = 0;
+
+	if (_launch_with_debug > 0)
+	{	
+		std::string txt_angle = std::to_string((int)roundf(powerline_2d_angle*DEG_PER_RAD))+"*";
+	
+		cv::putText(img, //target image
+				txt_angle, //text
+				cv::Point((img.cols / 2)-15, img.rows-25), //bottom-center position
+				cv::FONT_HERSHEY_DUPLEX,
+				1.0,
+				cv::Scalar(255,255,255), //font color
+				2);
+
+		sensor_msgs::msg::Image::SharedPtr msg = cv_bridge::CvImage(std_msgs::msg::Header(), "mono8", img).toImageMsg();
+
+		hough_line_pub->publish(*msg.get());
 	}
 }	
 
@@ -1465,7 +2095,9 @@ void RadarPCLFilter::powerline_detection() {
 		since_add_crop_downsample = 0;
 
 		static Eigen::Vector3f dir_axis;
-		RadarPCLFilter::direction_extraction_2D(_pl_search_cloud, dir_axis);
+		// RadarPCLFilter::direction_extraction_2D(_pl_search_cloud, dir_axis);
+		// RadarPCLFilter::direction_extraction_3D(_pl_search_cloud, dir_axis);
+		RadarPCLFilter::direction_extraction_25D(_pl_search_cloud, dir_axis);
 
 		pcl::PointCloud<pcl::PointXYZ>::Ptr extracted_cloud (new pcl::PointCloud<pcl::PointXYZ>);
 		if (_pl_search_cloud->size() > 1)
