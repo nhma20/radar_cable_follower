@@ -1,10 +1,8 @@
 // ROS2 includes
 #include <rclcpp/rclcpp.hpp>
-// #include <rclcpp/qos.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/msg/point_field.hpp>
 #include <geometry_msgs/msg/pose.hpp>
-// #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/pose_array.hpp>
 #include <px4_msgs/msg/vehicle_odometry.hpp>
 #include <tf2_ros/transform_listener.h>
@@ -15,17 +13,12 @@
 #include "geometry.h"
 #include "radar_cable_follower_msgs/msg/tracked_powerlines.hpp"
 
-
  // MISC includes
-// #include <algorithm>
 #include <cstdlib>
 #include <stdlib.h> 
-// #include <iostream>
 #include <chrono>
-// #include <ctime>    
 #include <math.h> 
 #include <cmath> 
-// #include <limits>
 #include <vector>
 #include <deque>
 #include <string>
@@ -38,26 +31,19 @@
 #include <pcl/point_cloud.h>
 #include <pcl/common/transforms.h>
 #include <pcl/common/angles.h>
-// #include <pcl/io/pcd_io.h>
 #include <pcl/filters/extract_indices.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/crop_box.h>
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/filters/random_sample.h>
-// #include <pcl/features/normal_3d.h>
 #include <pcl/search/kdtree.h>
 #include <pcl/sample_consensus/method_types.h>
 #include <pcl/sample_consensus/model_types.h>
 #include <pcl/sample_consensus/ransac.h>
 #include <pcl/sample_consensus/sac_model_line.h>
 #include <pcl/segmentation/sac_segmentation.h>
-// #include <pcl/segmentation/extract_clusters.h>
 
 
-// #include "opencv2/imgcodecs.hpp"
-// #include "opencv2/highgui.hpp"
-// #include "opencv2/imgproc.hpp"
-// #include "opencv2/core/hal/interface.hpp"
 
 
 
@@ -136,7 +122,7 @@ class RadarPCLFilter : public rclcpp::Node
 			this->declare_parameter<float>("hough_theta", PI/180);
 			this->get_parameter("hough_theta", _hough_theta);
 
-			this->declare_parameter<int>("hough_pixel_diameter", 2);
+			this->declare_parameter<int>("hough_pixel_diameter", 4);
 			this->get_parameter("hough_pixel_diameter", _hough_pixel_size);
 
 			this->declare_parameter<int>("hough_minimum_inliers", 35);
@@ -168,13 +154,13 @@ class RadarPCLFilter : public rclcpp::Node
 			geometry_msgs::msg::TransformStamped drone_tf;
 
 			_timer_pl = this->create_wall_timer(33ms, 
-				std::bind(&RadarPCLFilter::update_powerline_poses, this)); //, std::placeholders::_1
+				std::bind(&RadarPCLFilter::update_powerline_poses, this));
 
 			_timer_tf = this->create_wall_timer(33ms, 
-				std::bind(&RadarPCLFilter::update_tf, this)); //, std::placeholders::_1
+				std::bind(&RadarPCLFilter::update_tf, this));
 
 			_timer_pcl = this->create_wall_timer(33ms, 
-				std::bind(&RadarPCLFilter::powerline_detection, this)); //, std::placeholders::_1
+				std::bind(&RadarPCLFilter::powerline_detection, this));
 
 
 			while(true) {
@@ -274,8 +260,7 @@ class RadarPCLFilter : public rclcpp::Node
 		std::vector<line_model_t> _line_models;
 
 		void add_new_radar_pointcloud(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
-
-		// void transform_pointcloud_to_world(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
+		
 
 		void read_pointcloud(const sensor_msgs::msg::PointCloud2::SharedPtr msg, 
 										pcl::PointCloud<pcl::PointXYZ>::Ptr cloud);
