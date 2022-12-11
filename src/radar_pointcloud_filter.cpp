@@ -13,6 +13,10 @@
 #include "geometry.h"
 #include "radar_cable_follower_msgs/msg/tracked_powerlines.hpp"
 
+// Debug
+#include <geometry_msgs/msg/point_stamped.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
+
  // MISC includes
 #include <cstdlib>
 #include <stdlib.h> 
@@ -125,13 +129,13 @@ class RadarPCLFilter : public rclcpp::Node
 			this->declare_parameter<int>("hough_pixel_diameter", 4);
 			this->get_parameter("hough_pixel_diameter", _hough_pixel_size);
 
-			this->declare_parameter<int>("hough_minimum_inliers", 35);
+			this->declare_parameter<int>("hough_minimum_inliers", 20);
 			this->get_parameter("hough_minimum_inliers", _hough_minimum_inliers);
 
 			this->declare_parameter<int>("hough_minimum_length", 40);
 			this->get_parameter("hough_minimum_length", _hough_minimum_length);
 
-			this->declare_parameter<int>("hough_maximum_gap", 30);
+			this->declare_parameter<int>("hough_maximum_gap", 20);
 			this->get_parameter("hough_maximum_gap", _hough_maximum_gap);
 			
 
@@ -147,6 +151,9 @@ class RadarPCLFilter : public rclcpp::Node
 			vis_tracked_powerlines_pub = this->create_publisher<geometry_msgs::msg::PoseArray>("/vis_powerlines_array", 10);
 
 			tracked_powerlines_pub = this->create_publisher<radar_cable_follower_msgs::msg::TrackedPowerlines>("/tracked_powerlines", 10);
+
+			debug_point = this->create_publisher<geometry_msgs::msg::PointStamped>("/debug_point", 10);
+			debug_pose = this->create_publisher<geometry_msgs::msg::PoseStamped>("/debug_pose", 10);
 
 			tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
 			transform_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -210,6 +217,9 @@ class RadarPCLFilter : public rclcpp::Node
 		rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr hough_line_pub;
 		rclcpp::Publisher<radar_cable_follower_msgs::msg::TrackedPowerlines>::SharedPtr tracked_powerlines_pub;
 		rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr vis_tracked_powerlines_pub;
+
+		rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr debug_point;
+		rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr debug_pose;
 
 		rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr raw_pcl_subscription_;
 
@@ -366,16 +376,20 @@ void RadarPCLFilter::update_powerline_poses() {
 
 		plane_t proj_plane;
 
+		// create plane from drone position and estimated powerline direction
 		_drone_xyz_mutex.lock(); {
 	
+
 			new_drone_xyz(0) = _t_xyz(0);
 			new_drone_xyz(1) = _t_xyz(1);
 			new_drone_xyz(2) = -_t_xyz(2);
+
 
 			proj_plane = create_plane(_line_models.at(0).quaternion, _t_xyz);
 
 		} _drone_xyz_mutex.unlock();
 
+		// project estimated poses onto projection plane
 		for (size_t i = 0; i < _line_models.size(); i++)
 		{	
 
@@ -764,6 +778,7 @@ std::vector<line_model_t> RadarPCLFilter::parallel_line_extraction(pcl::PointClo
 	seg.setMethodType (pcl::SAC_RANSAC);
 	seg.setDistanceThreshold ((float)_line_model_distance_thresh);
 	seg.setAxis( (-1 * axis ) ); // needs to be negated for some reason?
+
 	seg.setEpsAngle(pcl::deg2rad((double)_line_model_parallel_angle_threshold));//(_line_model_parallel_angle_threshold/DEG_PER_RAD)); //90/DEG_PER_RAD);//
 
 	pcl::PointCloud<pcl::PointXYZ>::Ptr reduced_cloud (new pcl::PointCloud<pcl::PointXYZ>);
@@ -792,8 +807,15 @@ std::vector<line_model_t> RadarPCLFilter::parallel_line_extraction(pcl::PointClo
 		// scale factor for X and Y to compensate ignoring Z
 		float z_factor = 1 / sqrt( pow(coefficients->values[3],2) + pow(coefficients->values[4],2) );
 		// calculate yaw in world frame (+90 to -90 deg relative to X direction)
-		float tmp_powerline_world_yaw = -1 * (abs(coefficients->values[3]) / coefficients->values[3]) * acos(abs(coefficients->values[3])) * z_factor;
-		
+		float tmp_powerline_world_yaw;
+		if(_sensor_upwards_or_downwards == "downwards")
+		{
+			tmp_powerline_world_yaw = -1 * (abs(coefficients->values[3]) / coefficients->values[3]) * acos(abs(coefficients->values[3])) * z_factor;
+		}
+		else
+		{	
+			tmp_powerline_world_yaw = (abs(coefficients->values[3]) / coefficients->values[3]) * acos(abs(coefficients->values[3])) * z_factor;
+		}
 		// break if difference between current and previous yaw is above 45 degrees (0.7854 rads)
 		if ( count++ > 0 && abs(tmp_powerline_world_yaw - yaw_list.back()) > 0.7854 )
 		{
@@ -803,7 +825,7 @@ std::vector<line_model_t> RadarPCLFilter::parallel_line_extraction(pcl::PointClo
 		yaw_list.push_back(tmp_powerline_world_yaw);
 		
 		_powerline_world_yaw = tmp_powerline_world_yaw;
-		// RCLCPP_INFO(this->get_logger(),  "Powerline yaw: %f", (_powerline_world_yaw*DEG_PER_RAD));
+		RCLCPP_INFO(this->get_logger(),  "Powerline yaw: %f", (_powerline_world_yaw*DEG_PER_RAD));
 		
 		point_t pl_position(
 			coefficients->values[0],
@@ -1275,7 +1297,7 @@ void RadarPCLFilter::direction_extraction_25D(pcl::PointCloud<pcl::PointXYZ>::Pt
 	std::vector<float> curr_cluster;
 	curr_cluster.push_back(curr_angle);
 
-	// divide found hough angles into clusters
+	// divide sampled Z coordinates into clusters
 	for (size_t i = 1; i < z_coords.size(); i++)
 	{				
 		if( abs(z_coords.at(i) - curr_angle) <= eps ) 
@@ -1347,8 +1369,8 @@ void RadarPCLFilter::direction_extraction_25D(pcl::PointCloud<pcl::PointXYZ>::Pt
 	// filter away points higher and lower than highest cluster average
 	pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_cropped(new pcl::PointCloud<pcl::PointXYZ>);
 	pcl::CropBox<pcl::PointXYZ> boxFilter;
-	boxFilter.setMin(Eigen::Vector4f(minX, minY, (avg_height-1), 1.0));
-	boxFilter.setMax(Eigen::Vector4f(maxX, maxY, (avg_height+1), 1.0));
+	boxFilter.setMin(Eigen::Vector4f(minX, minY, (avg_height-1.5), 1.0));
+	boxFilter.setMax(Eigen::Vector4f(maxX, maxY, (avg_height+1.5), 1.0));
 	boxFilter.setInputCloud(cloud_in);
 	boxFilter.filter(*cloud_cropped);
 
@@ -1589,15 +1611,15 @@ void RadarPCLFilter::direction_extraction_25D(pcl::PointCloud<pcl::PointXYZ>::Pt
 				sum += clusters.at(biggest_cluster_idx).at(i);
 			}
 
-			powerline_2d_angle = 0.5*powerline_2d_angle + 0.5*(sum / count); // simple low pass filter
+			powerline_2d_angle = 0.75*powerline_2d_angle + 0.25*(sum / count); // simple low pass filter
 		}
 	}
-
 
 	// update direction axis that is used for 3D parallel line fit
 	dir_axis(0) = cos(powerline_2d_angle);
 	dir_axis(1) = sin(powerline_2d_angle);
 	dir_axis(2) = 0;
+
 
 	if (_launch_with_debug > 0)
 	{	
@@ -1616,7 +1638,6 @@ void RadarPCLFilter::direction_extraction_25D(pcl::PointCloud<pcl::PointXYZ>::Pt
 		hough_line_pub->publish(*msg.get());
 	}
 }
-
 
 void RadarPCLFilter::direction_extraction_3D(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in, 
 												Eigen::Vector3f &dir_axis) {
