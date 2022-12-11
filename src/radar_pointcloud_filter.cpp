@@ -1276,14 +1276,8 @@ void RadarPCLFilter::direction_extraction_25D(pcl::PointCloud<pcl::PointXYZ>::Pt
 
 	std::vector<float> z_coords;
 
-	RCLCPP_INFO(this->get_logger(),  "Z vals:");
 	for (size_t i = 0; i < sample_cloud->size(); i++)
 	{
-		// RCLCPP_INFO(this->get_logger(), "\n\nSearch point:\nX: %f\nY: %f\nZ: %f\n", searchPoint.x , searchPoint.y, searchPoint.z);
-
-		// int z_coord = (int)round(sample_cloud->at(i).z*10);
-		// RCLCPP_INFO(this->get_logger(), "%d", z_coord);
-
 		z_coords.push_back(sample_cloud->at(i).z);
 	}
 
@@ -1314,20 +1308,19 @@ void RadarPCLFilter::direction_extraction_25D(pcl::PointCloud<pcl::PointXYZ>::Pt
 	clusters.push_back(curr_cluster);
 
 		
-	// print clusters
-	RCLCPP_INFO(this->get_logger(),  "Angle values:");
-	for (size_t i = 0; i < clusters.size(); i++)
-	{
-		RCLCPP_INFO(this->get_logger(),  "Cluster %d:", i);
-		for (size_t j = 0; j < clusters.at(i).size(); j++)
-		{
-			RCLCPP_INFO(this->get_logger(),  "%f \t", clusters.at(i).at(j));
-		}
-	}
+	// // print clusters
+	// RCLCPP_INFO(this->get_logger(),  "Angle values:");
+	// for (size_t i = 0; i < clusters.size(); i++)
+	// {
+	// 	RCLCPP_INFO(this->get_logger(),  "Cluster %d:", i);
+	// 	for (size_t j = 0; j < clusters.at(i).size(); j++)
+	// 	{
+	// 		RCLCPP_INFO(this->get_logger(),  "%f \t", clusters.at(i).at(j));
+	// 	}
+	// }
 
 
-	// find biggest cluster
-	int highest_cluster = -1;
+	// find highest cluster
 	int highest_cluster_idx = -1;
 	float highest_z = -1;
 	// int second_biggest_cluster = -2;
@@ -1335,10 +1328,14 @@ void RadarPCLFilter::direction_extraction_25D(pcl::PointCloud<pcl::PointXYZ>::Pt
 	{
 		if ((int)clusters.at(i).size() > 2 && clusters.at(i).at(clusters.at(i).size()-1) > highest_z)
 		{
-			highest_cluster = (int)clusters.at(i).size();
 			highest_cluster_idx = (int)i;
 			highest_z = clusters.at(i).at(clusters.at(i).size()-1);
 		}
+	}
+
+	if(highest_cluster_idx == -1)
+	{
+		return;
 	}
 
 	// average heighest cluster
@@ -1350,29 +1347,24 @@ void RadarPCLFilter::direction_extraction_25D(pcl::PointCloud<pcl::PointXYZ>::Pt
 	{
 		sum += clusters.at(highest_cluster_idx).at(i);
 	}
-	// avg_height = 0.8*avg_height + 0.2*(sum / count); // simple low pass filter
-	avg_height = sum / count;
-	RCLCPP_INFO(this->get_logger(),  "Highest cluster: %d", highest_cluster_idx);
-	RCLCPP_INFO(this->get_logger(),  "Highest cluster size: %d", highest_cluster);
-	RCLCPP_INFO(this->get_logger(),  "Highest cluster height: %f", avg_height);
+	avg_height = 0.5*avg_height + 0.5*(sum / count); // simple low pass filter
 
+	// RCLCPP_INFO(this->get_logger(),  "Highest cluster: %d", highest_cluster_idx);
+	// RCLCPP_INFO(this->get_logger(),  "Highest cluster size: %d", highest_cluster);
+	// RCLCPP_INFO(this->get_logger(),  "Highest cluster height: %f", avg_height);
+
+	// make big enough to clear everything
 	float minX = -10000;
 	float minY = -10000;
 	float maxX = 10000;
 	float maxY = 10000;
 
+	// filter away points higher and lower than highest cluster average
 	pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_cropped(new pcl::PointCloud<pcl::PointXYZ>);
 	pcl::CropBox<pcl::PointXYZ> boxFilter;
-	boxFilter.setMin(Eigen::Vector4f(minX, minY, -1000, 1.0));
-	boxFilter.setMax(Eigen::Vector4f(maxX, maxY, (avg_height-1), 1.0));
+	boxFilter.setMin(Eigen::Vector4f(minX, minY, (avg_height-1), 1.0));
+	boxFilter.setMax(Eigen::Vector4f(maxX, maxY, (avg_height+1), 1.0));
 	boxFilter.setInputCloud(cloud_in);
-	boxFilter.setNegative(true);
-	boxFilter.filter(*cloud_cropped);
-
-	boxFilter.setMin(Eigen::Vector4f(minX, minY, (avg_height+1), 1.0));
-	boxFilter.setMax(Eigen::Vector4f(maxX, maxY, 1000, 1.0));
-	boxFilter.setInputCloud(cloud_cropped);
-	boxFilter.setNegative(true);
 	boxFilter.filter(*cloud_cropped);
 
 	
@@ -1404,7 +1396,6 @@ void RadarPCLFilter::direction_extraction_25D(pcl::PointCloud<pcl::PointXYZ>::Pt
 			img.at<uchar>(y_tmp, x_tmp) = 255;
 		}
 	}
-
 
 
 	// Probabilistic Line Transform
@@ -1561,18 +1552,18 @@ void RadarPCLFilter::direction_extraction_25D(pcl::PointCloud<pcl::PointXYZ>::Pt
 		}
 		
 		
-		// print clusters
-		RCLCPP_INFO(this->get_logger(),  "Angle values:");
-		for (size_t i = 0; i < clusters.size(); i++)
-		{
-			RCLCPP_INFO(this->get_logger(),  "Cluster %d:", i);
-			for (size_t j = 0; j < clusters.at(i).size(); j++)
-			{
-				RCLCPP_INFO(this->get_logger(),  "%f \t", clusters.at(i).at(j));
-			}
-		}
-		RCLCPP_INFO(this->get_logger(),  "over 85: %d", over_85_count);
-		RCLCPP_INFO(this->get_logger(),  "under -85: %d", under_minus_85_count);
+		// // print clusters
+		// RCLCPP_INFO(this->get_logger(),  "Angle values:");
+		// for (size_t i = 0; i < clusters.size(); i++)
+		// {
+		// 	RCLCPP_INFO(this->get_logger(),  "Cluster %d:", i);
+		// 	for (size_t j = 0; j < clusters.at(i).size(); j++)
+		// 	{
+		// 		RCLCPP_INFO(this->get_logger(),  "%f \t", clusters.at(i).at(j));
+		// 	}
+		// }
+		// RCLCPP_INFO(this->get_logger(),  "over 85: %d", over_85_count);
+		// RCLCPP_INFO(this->get_logger(),  "under -85: %d", under_minus_85_count);
 
 
 		// find biggest cluster
@@ -1613,7 +1604,7 @@ void RadarPCLFilter::direction_extraction_25D(pcl::PointCloud<pcl::PointXYZ>::Pt
 				sum += clusters.at(biggest_cluster_idx).at(i);
 			}
 
-			powerline_2d_angle = 0.8*powerline_2d_angle + 0.2*(sum / count); // simple low pass filter
+			powerline_2d_angle = 0.5*powerline_2d_angle + 0.5*(sum / count); // simple low pass filter
 		}
 	}
 
