@@ -512,13 +512,13 @@ void OffboardControl::publish_tracking_setpoint() {
 
 	px4_msgs::msg::TrajectorySetpoint msg{};
 	msg.timestamp = _timestamp.load();
-	msg.position[0] = publish_pose.position(0); // in meters NED
-	msg.position[1] = publish_pose.position(1); // in meters NED
-	msg.position[2] = publish_pose.position(2); // in meters NED
+	msg.x = publish_pose.position(0); // in meters NED
+	msg.y = publish_pose.position(1); // in meters NED
+	msg.z = publish_pose.position(2); // in meters NED
 	msg.yaw = publish_pose.orientation(2); // rotation around z NED in radians
-	msg.velocity[0] = unit_velocity(0); // m/s NED
-	msg.velocity[1] = unit_velocity(1); // m/s NED
-	msg.velocity[2] = unit_velocity(2); // m/s NED
+	msg.vx = unit_velocity(0); // m/s NED
+	msg.vy = unit_velocity(1); // m/s NED
+	msg.vz = unit_velocity(2); // m/s NED
 
 	// RCLCPP_INFO(this->get_logger(), "Xv:%f Yv:%f Zv:%f", msg.velocity[0], msg.velocity[1], msg.velocity[2]);
 
@@ -546,9 +546,9 @@ void OffboardControl::publish_takeoff_setpoint() const {
 
 	px4_msgs::msg::TrajectorySetpoint msg{};
 	msg.timestamp = _timestamp.load();
-	msg.position[0] = NWU_to_NED_pose.position(0); 		// in meters NED
-	msg.position[1] = NWU_to_NED_pose.position(1);
-	msg.position[2] = - _takeoff_height;
+	msg.x = NWU_to_NED_pose.position(0); 		// in meters NED
+	msg.y = NWU_to_NED_pose.position(1);
+	msg.z = - _takeoff_height;
 	// YAW is cropped to 0-PI for some reason, uncrop to 0-2PI based on if ROLL is 0 or PI
 	msg.yaw = (float)NWU_to_NED_pose.orientation(2);
 
@@ -570,9 +570,9 @@ void OffboardControl::publish_hold_setpoint() const {
 
 	px4_msgs::msg::TrajectorySetpoint msg{}; // in meters NED
 	msg.timestamp = _timestamp.load();
-	msg.position[0] = NWU_to_NED_pose.position(0); 		
-	msg.position[1] = NWU_to_NED_pose.position(1);
-	msg.position[2] = NWU_to_NED_pose.position(2);
+	msg.x = NWU_to_NED_pose.position(0); 		
+	msg.y = NWU_to_NED_pose.position(1);
+	msg.z = NWU_to_NED_pose.position(2);
 	//YAW is cropped to 0-PI for some reason, uncrop to 0-2PI based on if ROLL is 0 or PI
 	msg.yaw = (float)NWU_to_NED_pose.orientation(2);// + (float)NWU_to_NED_pose.orientation(0);
 
@@ -607,9 +607,9 @@ void OffboardControl::publish_setpoint(px4_msgs::msg::TrajectorySetpoint msg) co
 		pose_msg.pose.orientation.y = quat(1);
 		pose_msg.pose.orientation.z = quat(2);
 		pose_msg.pose.orientation.w = quat(3);
-		pose_msg.pose.position.x = msg.position[0];
-		pose_msg.pose.position.y = -msg.position[1]; // NED to NWU
-		pose_msg.pose.position.z = -msg.position[2]; // NED to NWU
+		pose_msg.pose.position.x = msg.x;
+		pose_msg.pose.position.y = -msg.y; // NED to NWU
+		pose_msg.pose.position.z = -msg.z; // NED to NWU
 
 		_follow_pose_pub->publish(pose_msg);
 	}
