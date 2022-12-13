@@ -24,6 +24,7 @@ find_package(rclpy REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
 find_package(px4_msgs REQUIRED)
 find_package(builtin_interfaces REQUIRED)
 find_package(fastcdr REQUIRED)
@@ -70,6 +71,7 @@ add_executable(offboard_control
   geometry_msgs
   px4_msgs
   std_msgs
+  nav_msgs
   tf2
   tf2_ros
   tf2_msgs

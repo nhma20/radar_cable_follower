@@ -37,11 +37,16 @@
 #include <px4_msgs/msg/vehicle_command.hpp>
 #include <px4_msgs/msg/vehicle_control_mode.hpp>
 #include <px4_msgs/msg/vehicle_status.hpp>
+
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/pose_array.hpp>
 #include <geometry_msgs/msg/point.hpp>
 #include <geometry_msgs/msg/point_stamped.hpp>
+
 #include <std_msgs/msg/int32.hpp>
+
+#include <nav_msgs/msg/path.hpp>
+
 #include <radar_cable_follower_msgs/msg/tracked_powerlines.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <tf2_ros/transform_listener.h>
@@ -114,6 +119,7 @@ public:
 		if(_launch_with_debug > 0)
 		{
 			_follow_pose_pub = this->create_publisher<geometry_msgs::msg::PoseStamped>("/follow_pose", 10);
+			_path_pub = this->create_publisher<nav_msgs::msg::Path>("/path", 10);
 		}
 
 		tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
@@ -132,6 +138,9 @@ public:
 
 		_mission_timer = this->create_wall_timer(10000ms, 
 				std::bind(&OffboardControl::mission_state_machine, this));
+
+		_path_timer = this->create_wall_timer(333ms, 
+				std::bind(&OffboardControl::publish_path, this));
 		
 	}
 
@@ -151,11 +160,13 @@ public:
 private:
 	rclcpp::TimerBase::SharedPtr timer_;
 	rclcpp::TimerBase::SharedPtr _mission_timer;
+	rclcpp::TimerBase::SharedPtr _path_timer;
 
 	rclcpp::Publisher<px4_msgs::msg::OffboardControlMode>::SharedPtr _offboard_control_mode_publisher;
 	rclcpp::Publisher<px4_msgs::msg::TrajectorySetpoint>::SharedPtr _trajectory_setpoint_publisher;
 	rclcpp::Publisher<px4_msgs::msg::VehicleCommand>::SharedPtr _vehicle_command_publisher;
 	rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr _follow_pose_pub;
+	rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr _path_pub;
 
 	rclcpp::Subscription<radar_cable_follower_msgs::msg::TrackedPowerlines>::SharedPtr _powerline_pose_sub;
 	rclcpp::Subscription<px4_msgs::msg::Timesync>::SharedPtr _timesync_sub;
@@ -189,6 +200,7 @@ private:
 
 	float _hover_height = 2;
 
+	void publish_path();
 	void mission_state_machine();
 	void flight_state_machine();
 	void update_drone_pose();
@@ -202,6 +214,35 @@ private:
 				     float param2 = 0.0) const;
 	void world_to_points();
 };
+
+
+void OffboardControl::publish_path() {
+
+	static auto path_msg = nav_msgs::msg::Path();
+	path_msg.header.stamp = this->now();
+	path_msg.header.frame_id = "world";
+
+	auto pose_msg = geometry_msgs::msg::PoseStamped();
+	pose_msg.header.stamp = this->now();
+	pose_msg.header.frame_id = "world";
+
+	_drone_pose_mutex.lock(); {
+
+		pose_msg.pose.position.x = _drone_pose.position(0);
+		pose_msg.pose.position.y = _drone_pose.position(1);
+		pose_msg.pose.position.z = _drone_pose.position(2);
+
+		pose_msg.pose.orientation.x = _drone_pose.quaternion(0);
+		pose_msg.pose.orientation.y = _drone_pose.quaternion(1);
+		pose_msg.pose.orientation.z = _drone_pose.quaternion(2);
+		pose_msg.pose.orientation.w = _drone_pose.quaternion(3);
+
+	} _drone_pose_mutex.unlock();
+
+	path_msg.poses.push_back(pose_msg);
+
+	_path_pub->publish(path_msg);
+}
 
 
 void OffboardControl::mission_state_machine() {
