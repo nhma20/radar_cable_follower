@@ -119,7 +119,8 @@ public:
 		if(_launch_with_debug > 0)
 		{
 			_follow_pose_pub = this->create_publisher<geometry_msgs::msg::PoseStamped>("/follow_pose", 10);
-			_path_pub = this->create_publisher<nav_msgs::msg::Path>("/path", 10);
+			_manual_path_pub = this->create_publisher<nav_msgs::msg::Path>("/manual_path", 10);
+			_offboard_path_pub = this->create_publisher<nav_msgs::msg::Path>("/offboard_path", 10);
 		}
 
 		tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
@@ -139,7 +140,7 @@ public:
 		_mission_timer = this->create_wall_timer(10000ms, 
 				std::bind(&OffboardControl::mission_state_machine, this));
 
-		_path_timer = this->create_wall_timer(333ms, 
+		_path_timer = this->create_wall_timer(500ms, 
 				std::bind(&OffboardControl::publish_path, this));
 		
 	}
@@ -166,7 +167,8 @@ private:
 	rclcpp::Publisher<px4_msgs::msg::TrajectorySetpoint>::SharedPtr _trajectory_setpoint_publisher;
 	rclcpp::Publisher<px4_msgs::msg::VehicleCommand>::SharedPtr _vehicle_command_publisher;
 	rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr _follow_pose_pub;
-	rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr _path_pub;
+	rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr _manual_path_pub;
+	rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr _offboard_path_pub;
 
 	rclcpp::Subscription<radar_cable_follower_msgs::msg::TrackedPowerlines>::SharedPtr _powerline_pose_sub;
 	rclcpp::Subscription<px4_msgs::msg::Timesync>::SharedPtr _timesync_sub;
@@ -217,10 +219,16 @@ private:
 
 
 void OffboardControl::publish_path() {
+	// limit length
+	// offboard and manual paths
 
-	static auto path_msg = nav_msgs::msg::Path();
-	path_msg.header.stamp = this->now();
-	path_msg.header.frame_id = "world";
+	static auto manual_path_msg = nav_msgs::msg::Path();
+	manual_path_msg.header.stamp = this->now();
+	manual_path_msg.header.frame_id = "world";
+
+	static auto offboard_path_msg = nav_msgs::msg::Path();
+	offboard_path_msg.header.stamp = this->now();
+	offboard_path_msg.header.frame_id = "world";
 
 	auto pose_msg = geometry_msgs::msg::PoseStamped();
 	pose_msg.header.stamp = this->now();
@@ -239,9 +247,46 @@ void OffboardControl::publish_path() {
 
 	} _drone_pose_mutex.unlock();
 
-	path_msg.poses.push_back(pose_msg);
 
-	_path_pub->publish(path_msg);
+	if (_in_offboard)
+	{
+		float dist = 99999.9;
+
+		if (offboard_path_msg.poses.size() > 0 )
+		{		
+			float x_diff = offboard_path_msg.poses.back().pose.position.x - pose_msg.pose.position.x;
+			float y_diff = offboard_path_msg.poses.back().pose.position.y - pose_msg.pose.position.y;
+			float z_diff = offboard_path_msg.poses.back().pose.position.z - pose_msg.pose.position.z;
+			dist = sqrt(pow(x_diff, 2) + pow(y_diff, 2) + pow(z_diff, 2));
+		}		
+
+		if(dist > 1.0)
+		{
+			offboard_path_msg.poses.push_back(pose_msg);
+			_offboard_path_pub->publish(offboard_path_msg);
+		}
+		manual_path_msg.poses.clear();
+	}
+	else
+	{
+		float dist = 99999.9;
+
+		if (manual_path_msg.poses.size() > 0 )
+		{	
+			float x_diff = manual_path_msg.poses.back().pose.position.x - pose_msg.pose.position.x;
+			float y_diff = manual_path_msg.poses.back().pose.position.y - pose_msg.pose.position.y;
+			float z_diff = manual_path_msg.poses.back().pose.position.z - pose_msg.pose.position.z;
+			dist = sqrt(pow(x_diff, 2) + pow(y_diff, 2) + pow(z_diff, 2));
+		}	
+
+		if(dist > 1.0)
+		{
+			manual_path_msg.poses.push_back(pose_msg);
+			_manual_path_pub->publish(manual_path_msg);
+		}
+		offboard_path_msg.poses.clear();
+	}
+		
 }
 
 
