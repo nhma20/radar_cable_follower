@@ -188,6 +188,8 @@ private:
 	int _launch_with_debug;
 	float _takeoff_height;
 
+	bool _new_takeoff = true;
+
     bool _printed_offboard = false;
 
 	bool _in_offboard = false;
@@ -208,7 +210,7 @@ private:
 	void update_drone_pose();
 	void update_alignment_pose(radar_cable_follower_msgs::msg::TrackedPowerlines::SharedPtr msg);
 	void publish_offboard_control_mode() const;
-	void publish_takeoff_setpoint() const;
+	void publish_takeoff_setpoint();
 	void publish_tracking_setpoint();
 	void publish_hold_setpoint() const;
 	void publish_setpoint(px4_msgs::msg::TrajectorySetpoint msg) const;
@@ -347,6 +349,7 @@ void OffboardControl::flight_state_machine() {
 
 		publish_hold_setpoint();
 		_in_offboard = false;
+		_new_takeoff = true;
 		_old_nav_state = _nav_state;
 		_counter = 0;
 		return;
@@ -616,15 +619,14 @@ void OffboardControl::publish_tracking_setpoint() {
  * @brief Publish a trajectory setpoint
  *        Drone should take off to _takeoff_height
  */
-void OffboardControl::publish_takeoff_setpoint() const {
+void OffboardControl::publish_takeoff_setpoint() {
 
 	static pose_eul_t NWU_to_NED_pose;	
 
-	static bool takeoff_start = true;
-	if (takeoff_start == true)
+	if (_new_takeoff == true)
 	{	
 		// freeze takeoff setpoint
-		takeoff_start = false;
+		_new_takeoff = false;
 		NWU_to_NED_pose.position = _drone_pose.position; 
 		NWU_to_NED_pose.orientation = quatToEul(_drone_pose.quaternion);
 		NWU_to_NED_pose = pose_NWU_to_NED(NWU_to_NED_pose);
