@@ -37,6 +37,7 @@
 #include <px4_msgs/msg/vehicle_command.hpp>
 #include <px4_msgs/msg/vehicle_control_mode.hpp>
 #include <px4_msgs/msg/vehicle_status.hpp>
+#include <px4_msgs/msg/rc_channels.hpp>
 
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/pose_array.hpp>
@@ -83,7 +84,9 @@ public:
 		this->declare_parameter<float>("yaw_frac", 0.25);
 		this->declare_parameter<float>("pos_frac", 0.5);
 		this->declare_parameter<float>("powerline_following_distance", 7.5);
-		this->declare_parameter<float>("powerline_following_speed", 0.25);
+		this->get_parameter("powerline_following_distance", _following_distance);
+		this->declare_parameter<float>("powerline_following_speed", 1.5);
+		this->get_parameter("powerline_following_speed", _follow_speed);
 		this->declare_parameter<int>("powerline_following_ID", -1);
 
 		this->declare_parameter<int>("launch_with_debug", 1);
@@ -99,6 +102,14 @@ public:
             [this](px4_msgs::msg::VehicleStatus::ConstSharedPtr msg) {
               _arming_state = msg->arming_state;
               _nav_state = msg->nav_state;
+			});
+
+
+		_rc_channels_sub = this->create_subscription<px4_msgs::msg::RcChannels>(
+			"/fmu/rc_channels/out",	10,
+            [this](px4_msgs::msg::RcChannels::ConstSharedPtr msg) {
+              _rc_misc_state = msg->channels[7];
+			//   RCLCPP_INFO(this->get_logger(),  "\nRC MISC state: %f", _rc_misc_state);
 			});
 
 
@@ -137,7 +148,7 @@ public:
 		timer_ = this->create_wall_timer(100ms, 
 				std::bind(&OffboardControl::flight_state_machine, this));
 
-		_mission_timer = this->create_wall_timer(10000ms, 
+		_mission_timer = this->create_wall_timer(250ms, 
 				std::bind(&OffboardControl::mission_state_machine, this));
 
 		_path_timer = this->create_wall_timer(500ms, 
@@ -174,6 +185,7 @@ private:
 	rclcpp::Subscription<px4_msgs::msg::Timesync>::SharedPtr _timesync_sub;
 	rclcpp::Subscription<px4_msgs::msg::VehicleStatus>::SharedPtr _vehicle_status_sub;
 	rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr _selected_id_sub;
+	rclcpp::Subscription<px4_msgs::msg::RcChannels>::SharedPtr _rc_channels_sub;
 
 	std::shared_ptr<tf2_ros::TransformListener> transform_listener_{nullptr};
 	std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -189,6 +201,8 @@ private:
 	float _takeoff_height;
 
 	bool _new_takeoff = true;
+	float _rc_misc_state = -1;
+	float _prev_rc_misc_state = -2;
 
     bool _printed_offboard = false;
 
@@ -294,37 +308,58 @@ void OffboardControl::publish_path() {
 
 void OffboardControl::mission_state_machine() {
 
-	static int callback_count = 0;
-
-	if (! _in_offboard)
+	if (! _in_offboard || _prev_rc_misc_state == _rc_misc_state)
 	{
 		return;
 	}
-	
 
-	if (callback_count == 0)
+	if (_rc_misc_state < -0.5)
 	{
-		RCLCPP_INFO(this->get_logger(),  "\nOriginal ID, original direction\n");
-	}
-
-	if (callback_count == 1)
-	{
-		this->set_parameter(rclcpp::Parameter("powerline_following_ID", 0));
+		RCLCPP_INFO(this->get_logger(),  "\nOriginal distance and speed\n");
 		this->set_parameter(rclcpp::Parameter("powerline_following_distance", _following_distance));
-		this->set_parameter(rclcpp::Parameter("powerline_following_speed", -_follow_speed*2));
-		RCLCPP_INFO(this->get_logger(),  "\nNew ID, reversing direction\n");
+		this->set_parameter(rclcpp::Parameter("powerline_following_speed", _follow_speed));
 	}
 
-	if (callback_count == 2)
+	if (_prev_rc_misc_state < -0.5 && _rc_misc_state > -0.5 && _rc_misc_state < 0.5)
 	{
-		this->set_parameter(rclcpp::Parameter("powerline_following_ID", 0));
 		this->set_parameter(rclcpp::Parameter("powerline_following_distance", _following_distance+7.5));
-		this->set_parameter(rclcpp::Parameter("powerline_following_speed", _follow_speed*2));
-		RCLCPP_INFO(this->get_logger(),  "\nGreater distance, increased speed\n");
+		RCLCPP_INFO(this->get_logger(),  "\nIncreasing following distance\n");
 	}
+
+	if (_prev_rc_misc_state > -0.5 && _prev_rc_misc_state < 0.5 && _rc_misc_state > 0.5)
+	{
+		// this->set_parameter(rclcpp::Parameter("powerline_following_ID", 0));
+		this->set_parameter(rclcpp::Parameter("powerline_following_speed", _follow_speed*2));
+		RCLCPP_INFO(this->get_logger(),  "\nIncreasing following speed\n");
+	}
+
+	_prev_rc_misc_state = _rc_misc_state;
+
+	// static int callback_count = 0;
+
+	// if (callback_count == 0)
+	// {
+	// 	RCLCPP_INFO(this->get_logger(),  "\nOriginal ID, original direction\n");
+	// }
+
+	// if (callback_count == 1)
+	// {
+	// 	this->set_parameter(rclcpp::Parameter("powerline_following_ID", 0));
+	// 	this->set_parameter(rclcpp::Parameter("powerline_following_distance", _following_distance));
+	// 	this->set_parameter(rclcpp::Parameter("powerline_following_speed", -_follow_speed*2));
+	// 	RCLCPP_INFO(this->get_logger(),  "\nNew ID, reversing direction\n");
+	// }
+
+	// if (callback_count == 2)
+	// {
+	// 	this->set_parameter(rclcpp::Parameter("powerline_following_ID", 0));
+	// 	this->set_parameter(rclcpp::Parameter("powerline_following_distance", _following_distance+7.5));
+	// 	this->set_parameter(rclcpp::Parameter("powerline_following_speed", _follow_speed*2));
+	// 	RCLCPP_INFO(this->get_logger(),  "\nGreater distance, increased speed\n");
+	// }
 	
 
-	callback_count++;
+	// callback_count++;
 }
 
 
@@ -465,13 +500,14 @@ void OffboardControl::update_alignment_pose(radar_cable_follower_msgs::msg::Trac
 		}
 	}
 
-	this->get_parameter("powerline_following_distance", _following_distance);	
+	float tmp_follow_dist;
+	this->get_parameter("powerline_following_distance", tmp_follow_dist);	
 
 	_powerline_mutex.lock(); {	
 
 		_alignment_pose.position(0) = msg->poses[highest_index].position.x;
 		_alignment_pose.position(1) = msg->poses[highest_index].position.y;
-		_alignment_pose.position(2) = msg->poses[highest_index].position.z + (float)_following_distance;
+		_alignment_pose.position(2) = msg->poses[highest_index].position.z + (float)tmp_follow_dist;
 
 		_alignment_pose.quaternion(0) = msg->poses[highest_index].orientation.x;
 		_alignment_pose.quaternion(1) = msg->poses[highest_index].orientation.y;
