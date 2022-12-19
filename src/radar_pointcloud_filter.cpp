@@ -1273,7 +1273,7 @@ void RadarPCLFilter::direction_extraction_2D(pcl::PointCloud<pcl::PointXYZ>::Ptr
 void RadarPCLFilter::direction_extraction_25D(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in, 
 												Eigen::Vector3f &dir_axis) {
 
-	if (cloud_in->size() < 1)
+	if (cloud_in->size() < 2)
 	{
 		return;
 	}
