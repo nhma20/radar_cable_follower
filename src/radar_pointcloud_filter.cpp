@@ -69,7 +69,7 @@ class RadarPCLFilter : public rclcpp::Node
 			this->declare_parameter<float>("leaf_size", 0.75);
 			this->get_parameter("leaf_size", _leaf_size);
 
-			this->declare_parameter<float>("model_thresh", 1.0);
+			this->declare_parameter<float>("model_thresh", 2.0);
 			this->get_parameter("model_thresh", _model_thresh);
 
 			this->declare_parameter<float>("ground_threshold", 1.5);
@@ -137,6 +137,10 @@ class RadarPCLFilter : public rclcpp::Node
 
 			this->declare_parameter<int>("hough_maximum_gap", 20);
 			this->get_parameter("hough_maximum_gap", _hough_maximum_gap);
+
+			this->declare_parameter<std::string>("sliced_hough_highest_or_cluster", "highest");
+			this->get_parameter("sliced_hough_highest_or_cluster", _sliced_Hough_highest_or_cluster);
+			
 			
 
 
@@ -252,6 +256,7 @@ class RadarPCLFilter : public rclcpp::Node
 		int _hough_minimum_inliers;
 		int _hough_maximum_gap;
 		int _hough_minimum_length;
+		std::string _sliced_Hough_highest_or_cluster;
 
 		int _t_tries = 0;
 
@@ -825,7 +830,7 @@ std::vector<line_model_t> RadarPCLFilter::parallel_line_extraction(pcl::PointClo
 		yaw_list.push_back(tmp_powerline_world_yaw);
 		
 		_powerline_world_yaw = tmp_powerline_world_yaw;
-		RCLCPP_INFO(this->get_logger(),  "Powerline yaw: %f", (_powerline_world_yaw*DEG_PER_RAD));
+		// RCLCPP_INFO(this->get_logger(),  "Powerline yaw: %f", (_powerline_world_yaw*DEG_PER_RAD));
 		
 		point_t pl_position(
 			coefficients->values[0],
@@ -1290,71 +1295,83 @@ void RadarPCLFilter::direction_extraction_25D(pcl::PointCloud<pcl::PointXYZ>::Pt
 
 	sort(z_coords.begin(), z_coords.end());
 
-	std::vector<std::vector<float>> clusters;
-	static float eps = 0.25; // threshold between bins
-	float curr_angle = z_coords.at(0);
-
-	std::vector<float> curr_cluster;
-	curr_cluster.push_back(curr_angle);
-
-	// divide sampled Z coordinates into clusters
-	for (size_t i = 1; i < z_coords.size(); i++)
-	{				
-		if( abs(z_coords.at(i) - curr_angle) <= eps ) 
-		{
-			curr_cluster.push_back(z_coords.at(i));
-		} 
-		else 
-		{
-			clusters.push_back(curr_cluster);
-			curr_cluster.clear();
-			curr_cluster.push_back(z_coords.at(i));
-		}
-		curr_angle = z_coords.at(i);
-	}
-	clusters.push_back(curr_cluster);
-
-		
-	// // print clusters
-	// RCLCPP_INFO(this->get_logger(),  "Angle values:");
-	// for (size_t i = 0; i < clusters.size(); i++)
-	// {
-	// 	RCLCPP_INFO(this->get_logger(),  "Cluster %d:", i);
-	// 	for (size_t j = 0; j < clusters.at(i).size(); j++)
-	// 	{
-	// 		RCLCPP_INFO(this->get_logger(),  "%f \t", clusters.at(i).at(j));
-	// 	}
-	// }
-
-
-	// find highest cluster
-	int highest_cluster_idx = -1;
-	float highest_z = -1;
-	// int second_biggest_cluster = -2;
-	for (size_t i = 0; i < clusters.size(); i++)
-	{
-		if ((int)clusters.at(i).size() > 2 && clusters.at(i).at(clusters.at(i).size()-1) > highest_z)
-		{
-			highest_cluster_idx = (int)i;
-			highest_z = clusters.at(i).at(clusters.at(i).size()-1);
-		}
-	}
-
-	if(highest_cluster_idx == -1)
-	{
-		return;
-	}
-
-	// average heighest cluster
-	float count = (float)clusters.at(highest_cluster_idx).size();
-	float sum = 0.0;
 	static float avg_height = 0.0;
 
-	for (size_t i = 0; i < clusters.at(highest_cluster_idx).size(); i++)
+	this->get_parameter("sliced_hough_highest_or_cluster", _sliced_Hough_highest_or_cluster);
+
+	if (_sliced_Hough_highest_or_cluster == "highest")
 	{
-		sum += clusters.at(highest_cluster_idx).at(i);
+		float second_highest_z = z_coords.at((z_coords.size()-2));
+		avg_height = 0.5*avg_height + 0.5*second_highest_z; // simple low pass filter
 	}
-	avg_height = 0.5*avg_height + 0.5*(sum / count); // simple low pass filter
+	else
+	{
+		std::vector<std::vector<float>> clusters;
+		static float eps = 0.25; // threshold between bins
+		float curr_angle = z_coords.at(0);
+
+		std::vector<float> curr_cluster;
+		curr_cluster.push_back(curr_angle);
+
+		// divide sampled Z coordinates into clusters
+		for (size_t i = 1; i < z_coords.size(); i++)
+		{				
+			if( abs(z_coords.at(i) - curr_angle) <= eps ) 
+			{
+				curr_cluster.push_back(z_coords.at(i));
+			} 
+			else 
+			{
+				clusters.push_back(curr_cluster);
+				curr_cluster.clear();
+				curr_cluster.push_back(z_coords.at(i));
+			}
+			curr_angle = z_coords.at(i);
+		}
+		clusters.push_back(curr_cluster);
+
+			
+		// // print clusters
+		// RCLCPP_INFO(this->get_logger(),  "Angle values:");
+		// for (size_t i = 0; i < clusters.size(); i++)
+		// {
+		// 	RCLCPP_INFO(this->get_logger(),  "Cluster %d:", i);
+		// 	for (size_t j = 0; j < clusters.at(i).size(); j++)
+		// 	{
+		// 		RCLCPP_INFO(this->get_logger(),  "%f \t", clusters.at(i).at(j));
+		// 	}
+		// }
+
+
+		// find highest cluster
+		int highest_cluster_idx = -1;
+		float highest_z = -1;
+		// int second_biggest_cluster = -2;
+		for (size_t i = 0; i < clusters.size(); i++)
+		{
+			if ((int)clusters.at(i).size() > 2 && clusters.at(i).at(clusters.at(i).size()-1) > highest_z)
+			{
+				highest_cluster_idx = (int)i;
+				highest_z = clusters.at(i).at(clusters.at(i).size()-1);
+			}
+		}
+
+		if(highest_cluster_idx == -1)
+		{
+			return;
+		}
+
+		// average heighest cluster
+		float count = (float)clusters.at(highest_cluster_idx).size();
+		float sum = 0.0;
+		for (size_t i = 0; i < clusters.at(highest_cluster_idx).size(); i++)
+		{
+			sum += clusters.at(highest_cluster_idx).at(i);
+		}
+
+		avg_height = 0.5*avg_height + 0.5*(sum / count); // simple low pass filter
+	}
+
 
 	// RCLCPP_INFO(this->get_logger(),  "Highest cluster: %d", highest_cluster_idx);
 	// RCLCPP_INFO(this->get_logger(),  "Highest cluster size: %d", highest_cluster);
