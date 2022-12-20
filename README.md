@@ -1,6 +1,9 @@
 # radar_cable_follower
 ROS2 package for the radar_cable_follower
 
+![uzh_rcf_data_example](https://user-images.githubusercontent.com/76950970/208649778-fa7fce0c-6278-4dfc-a520-ef954ad83a8b.jpg)
+
+
 ```sh
 launch radar_cable_follower SIM_radar_power_follower.launch.py
 ```
