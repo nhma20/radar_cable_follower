@@ -30,8 +30,8 @@ Height above ground below which all points are ignored (meters) (`float`):
 Points closer to the drone than this threshold are ignored (meters) (`float`):
 `ros2 param set /radar_pcl_filter_node drone_threshold 0.5`
 
-"Radius" of square around drone in which points are considered (meters) (`int`):
-`ros2 param set /radar_pcl_filter_node cluster_crop_radius 20`
+"Radius" of square around drone in which points are considered (meters) (`float`):
+`ros2 param set /radar_pcl_filter_node cluster_crop_radius 20.0`
 
 Rate at which pointcloud is cropped. 10/crop_rate Hz, higer value is lower frequency, 1 is fastest.
 `ros2 param set /radar_pcl_filter_node crop_rate 5`
