@@ -52,6 +52,7 @@
 
 
 #define DEG_PER_RAD 57.2957795
+#define RAD_PER_DEG 0.01745329
 #define PI 3.14159265
 
 using namespace std::chrono_literals;
@@ -140,6 +141,15 @@ class RadarPCLFilter : public rclcpp::Node
 
 			this->declare_parameter<std::string>("sliced_hough_highest_or_cluster", "highest");
 			this->get_parameter("sliced_hough_highest_or_cluster", _sliced_Hough_highest_or_cluster);
+
+			this->declare_parameter<float>("radar_elevation_fov", 40.0);
+			this->get_parameter("radar_elevation_fov", _radar_elevation_fov);
+			
+			this->declare_parameter<float>("radar_azimuth_fov", 120.0);
+			this->get_parameter("radar_azimuth_fov", _radar_azimuth_fov);
+
+			this->declare_parameter<bool>("reset_global_point_cloud", false);
+			this->get_parameter("reset_global_point_cloud", _reset_global_point_cloud);
 			
 			
 
@@ -257,6 +267,9 @@ class RadarPCLFilter : public rclcpp::Node
 		int _hough_maximum_gap;
 		int _hough_minimum_length;
 		std::string _sliced_Hough_highest_or_cluster;
+		float _radar_elevation_fov;
+		float _radar_azimuth_fov;
+		bool _reset_global_point_cloud;
 
 		int _t_tries = 0;
 
@@ -2062,6 +2075,23 @@ void RadarPCLFilter::read_pointcloud(const sensor_msgs::msg::PointCloud2::Shared
 	uint8_t *ptr = msg->data.data();
 	const uint32_t POINT_STEP = 12;
 
+	static int count = 0;
+	static float azimuth_tan_constant;
+	static float elevation_tan_constant;
+
+	if (count++ == 25) // only do at ~1Hz
+	{
+		this->get_parameter("radar_azimuth_fov", _radar_azimuth_fov);
+		this->get_parameter("radar_elevation_fov", _radar_elevation_fov);
+
+		azimuth_tan_constant = tan( (_radar_azimuth_fov*RAD_PER_DEG) / 2 );
+		elevation_tan_constant = tan( (_radar_elevation_fov*RAD_PER_DEG) / 2);
+
+		count = 0;
+	}
+
+	
+
 	for (size_t i = 0; i < (size_t)pcl_size; i++) 
 	{
 		pcl::PointXYZ point(
@@ -2070,7 +2100,17 @@ void RadarPCLFilter::read_pointcloud(const sensor_msgs::msg::PointCloud2::Shared
 				(float)(*(reinterpret_cast<float*>(ptr + 8)))
 			);
 
-		cloud->push_back(point);
+		// if ( point.y > 0.0 && abs(point.x)*azimuth_tan_constant < point.y && abs(point.z)*elevation_tan_constant < point.y )
+		// if ( (float)point.y > 0.0 && (float)point.y*(float)azimuth_tan_constant < (float)point.x && (float)point.y*(float)elevation_tan_constant < (float)point.z )
+		if ( (float)point.y > 0.0 && 
+				(float)abs(point.x)/(float)point.y < (float)azimuth_tan_constant &&
+				(float)abs(point.z)/(float)point.y < (float)elevation_tan_constant )
+		{
+			cloud->push_back(point);
+		}
+		
+
+		// cloud->push_back(point);
 
 		ptr += POINT_STEP;
 	}
@@ -2081,6 +2121,15 @@ void RadarPCLFilter::powerline_detection() {
 	this->get_parameter("launch_with_debug", _launch_with_debug);
 	this->get_parameter("voxel_or_time_concat", _voxel_or_time_concat);
 	this->get_parameter("add_crop_downsample_rate", _add_crop_downsample_rate);
+	this->get_parameter("reset_global_point_cloud", _reset_global_point_cloud);
+
+	if (_reset_global_point_cloud == true)
+	{
+		_concat_cloud->clear();
+		_pl_search_cloud->clear();
+		this->set_parameter(rclcpp::Parameter("reset_global_point_cloud", false));
+	}
+	
 	
 	static int since_add_crop_downsample = _add_crop_downsample_rate-1;
 
@@ -2113,7 +2162,7 @@ void RadarPCLFilter::powerline_detection() {
 		// RadarPCLFilter::direction_extraction_3D(_pl_search_cloud, dir_axis);
 		RadarPCLFilter::direction_extraction_25D(_pl_search_cloud, dir_axis);
 
-		pcl::PointCloud<pcl::PointXYZ>::Ptr extracted_cloud (new pcl::PointCloud<pcl::PointXYZ>);
+		// pcl::PointCloud<pcl::PointXYZ>::Ptr extracted_cloud (new pcl::PointCloud<pcl::PointXYZ>);
 		if (_pl_search_cloud->size() > 1)
 		{
 			this->get_parameter("line_or_point_follow", _line_or_point_follow);
