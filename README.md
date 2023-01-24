@@ -1,6 +1,12 @@
 # radar_cable_follower
 ROS2 package for the radar_cable_follower
 
+For hardware setup, see:
+https://github.com/nhma20/radar_cable_follower_HW
+
+![uzh_rcf_data_example](https://user-images.githubusercontent.com/76950970/208649778-fa7fce0c-6278-4dfc-a520-ef954ad83a8b.jpg)
+
+
 ```sh
 launch radar_cable_follower SIM_radar_power_follower.launch.py
 ```
@@ -24,8 +30,8 @@ Height above ground below which all points are ignored (meters) (`float`):
 Points closer to the drone than this threshold are ignored (meters) (`float`):
 `ros2 param set /radar_pcl_filter_node drone_threshold 0.5`
 
-"Radius" of square around drone in which points are considered (meters) (`int`):
-`ros2 param set /radar_pcl_filter_node cluster_crop_radius 20`
+"Radius" of square around drone in which points are considered (meters) (`float`):
+`ros2 param set /radar_pcl_filter_node cluster_crop_radius 20.0`
 
 Rate at which pointcloud is cropped. 10/crop_rate Hz, higer value is lower frequency, 1 is fastest.
 `ros2 param set /radar_pcl_filter_node crop_rate 5`
