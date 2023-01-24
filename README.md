@@ -63,6 +63,16 @@ Ratio with which current powerlines are updated with new measurement (`float`):
 Distance below which a match is considered during tracking (`float`):
 `ros2 param set /radar_pcl_filter_node tracking_update_euclid_dist 1.5`
 
+Maximum elevation angle of radar sensor. If a measurement is outside this angle it will be ignored (`float`):
+`ros2 param set /radar_pcl_filter_node radar_elevation_fov 40.0`
+
+Maximum azimuth angle of radar sensor. If a measurement is outside this angle it will be ignored (`float`):
+`ros2 param set /radar_pcl_filter_node radar_elevation_fov 120.0`
+
+Command to clear global point cloud (`bool`):
+`ros2 param set /radar_pcl_filter_node reset_global_point_cloud false`
+
+
 
 
 
