@@ -313,6 +313,26 @@ void OffboardControl::mission_state_machine() {
 		return;
 	}
 
+	// if (_rc_misc_state < -0.5)
+	// {
+	// 	RCLCPP_INFO(this->get_logger(),  "\nOriginal distance and speed\n");
+	// 	this->set_parameter(rclcpp::Parameter("powerline_following_distance", _following_distance));
+	// 	this->set_parameter(rclcpp::Parameter("powerline_following_speed", _follow_speed));
+	// }
+
+	// if (_prev_rc_misc_state < -0.5 && _rc_misc_state > -0.5 && _rc_misc_state < 0.5)
+	// {
+	// 	this->set_parameter(rclcpp::Parameter("powerline_following_distance", _following_distance+7.5));
+	// 	RCLCPP_INFO(this->get_logger(),  "\nIncreasing following distance\n");
+	// }
+
+	// if (_prev_rc_misc_state > -0.5 && _prev_rc_misc_state < 0.5 && _rc_misc_state > 0.5)
+	// {
+	// 	// this->set_parameter(rclcpp::Parameter("powerline_following_ID", 0));
+	// 	this->set_parameter(rclcpp::Parameter("powerline_following_speed", _follow_speed*2));
+	// 	RCLCPP_INFO(this->get_logger(),  "\nIncreasing following speed\n");
+	// }
+
 	if (_rc_misc_state < -0.5)
 	{
 		RCLCPP_INFO(this->get_logger(),  "\nOriginal distance and speed\n");
@@ -322,15 +342,14 @@ void OffboardControl::mission_state_machine() {
 
 	if (_prev_rc_misc_state < -0.5 && _rc_misc_state > -0.5 && _rc_misc_state < 0.5)
 	{
-		this->set_parameter(rclcpp::Parameter("powerline_following_distance", _following_distance+7.5));
-		RCLCPP_INFO(this->get_logger(),  "\nIncreasing following distance\n");
+		this->set_parameter(rclcpp::Parameter("powerline_following_speed", -_follow_speed));
+		RCLCPP_INFO(this->get_logger(),  "\nReverse direction\n");
 	}
 
 	if (_prev_rc_misc_state > -0.5 && _prev_rc_misc_state < 0.5 && _rc_misc_state > 0.5)
 	{
-		// this->set_parameter(rclcpp::Parameter("powerline_following_ID", 0));
-		this->set_parameter(rclcpp::Parameter("powerline_following_speed", _follow_speed*2));
-		RCLCPP_INFO(this->get_logger(),  "\nIncreasing following speed\n");
+		this->set_parameter(rclcpp::Parameter("powerline_following_speed", -_follow_speed));
+		RCLCPP_INFO(this->get_logger(),  "\nReverse direction\n");
 	}
 
 	_prev_rc_misc_state = _rc_misc_state;

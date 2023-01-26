@@ -2101,7 +2101,7 @@ void RadarPCLFilter::read_pointcloud(const sensor_msgs::msg::PointCloud2::Shared
 			);
 
 		// if ( point.y > 0.0 && abs(point.x)*azimuth_tan_constant < point.y && abs(point.z)*elevation_tan_constant < point.y )
-		// if ( (float)point.y > 0.0 && (float)point.y*(float)azimuth_tan_constant < (float)point.x && (float)point.y*(float)elevation_tan_constant < (float)point.z )
+		// if ( (float)point.y > 0.0 && (float)point.y*(float)azimuth_tan_constant < (float)abs(point.x) && (float)point.y*(float)elevation_tan_constant < (float)abs(point.z) )
 		if ( (float)point.y > 0.0 && 
 				(float)abs(point.x)/(float)point.y < (float)azimuth_tan_constant &&
 				(float)abs(point.z)/(float)point.y < (float)elevation_tan_constant )
