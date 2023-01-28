@@ -83,7 +83,7 @@ public:
 
 		this->declare_parameter<float>("yaw_frac", 0.25);
 		this->declare_parameter<float>("pos_frac", 0.5);
-		this->declare_parameter<float>("powerline_following_distance", 7.5);
+		this->declare_parameter<float>("powerline_following_distance", 5.0);
 		this->get_parameter("powerline_following_distance", _following_distance);
 		this->declare_parameter<float>("powerline_following_speed", 1.5);
 		this->get_parameter("powerline_following_speed", _follow_speed);
@@ -335,21 +335,20 @@ void OffboardControl::mission_state_machine() {
 
 	if (_rc_misc_state < -0.5)
 	{
-		RCLCPP_INFO(this->get_logger(),  "\nOriginal distance and speed\n");
-		this->set_parameter(rclcpp::Parameter("powerline_following_distance", _following_distance));
-		this->set_parameter(rclcpp::Parameter("powerline_following_speed", _follow_speed));
+		RCLCPP_INFO(this->get_logger(),  "\nForward direction\n");
+		this->set_parameter(rclcpp::Parameter("powerline_following_speed", abs(_follow_speed)));
 	}
 
-	if (_prev_rc_misc_state < -0.5 && _rc_misc_state > -0.5 && _rc_misc_state < 0.5)
+	if (_rc_misc_state > -0.5 && _rc_misc_state < 0.5)
 	{
-		this->set_parameter(rclcpp::Parameter("powerline_following_speed", -_follow_speed));
-		RCLCPP_INFO(this->get_logger(),  "\nReverse direction\n");
+		RCLCPP_INFO(this->get_logger(),  "\nStop\n");
+		this->set_parameter(rclcpp::Parameter("powerline_following_speed", 0.0));
 	}
 
-	if (_prev_rc_misc_state > -0.5 && _prev_rc_misc_state < 0.5 && _rc_misc_state > 0.5)
+	if (_rc_misc_state > 0.5)
 	{
-		this->set_parameter(rclcpp::Parameter("powerline_following_speed", -_follow_speed));
 		RCLCPP_INFO(this->get_logger(),  "\nReverse direction\n");
+		this->set_parameter(rclcpp::Parameter("powerline_following_speed", - abs(_follow_speed)));
 	}
 
 	_prev_rc_misc_state = _rc_misc_state;
