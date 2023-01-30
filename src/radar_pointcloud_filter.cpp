@@ -596,7 +596,7 @@ void RadarPCLFilter::add_new_radar_pointcloud(const sensor_msgs::msg::PointCloud
 
 	// filter ground and drone points 
 	this->get_parameter("ground_threshold", _ground_threshold);
-	this->get_parameter("ground_threshold", _drone_threshold);
+	this->get_parameter("drone_threshold", _drone_threshold);
 	RadarPCLFilter::filter_pointcloud(_ground_threshold, _drone_threshold, world_points);
 
 	if (world_points->size() < 1)
@@ -2041,7 +2041,7 @@ void RadarPCLFilter::filter_pointcloud(float ground_threshold, float drone_thres
 		if (_sensor_upwards_or_downwards == "downwards")
 		{
 
-			if ( ( cloud->at(i).z > ground_threshold )  && ( cloud->at(i).z < (_height_above_ground-drone_threshold) ) )
+			if ( ( cloud->at(i).z > ground_threshold ) )
 			{
 				inliers->indices.push_back(i);
 			}
@@ -2083,6 +2083,7 @@ void RadarPCLFilter::read_pointcloud(const sensor_msgs::msg::PointCloud2::Shared
 	{
 		this->get_parameter("radar_azimuth_fov", _radar_azimuth_fov);
 		this->get_parameter("radar_elevation_fov", _radar_elevation_fov);
+		this->get_parameter("drone_threshold", _drone_threshold);
 
 		azimuth_tan_constant = tan( (_radar_azimuth_fov*RAD_PER_DEG) / 2 );
 		elevation_tan_constant = tan( (_radar_elevation_fov*RAD_PER_DEG) / 2);
@@ -2102,15 +2103,12 @@ void RadarPCLFilter::read_pointcloud(const sensor_msgs::msg::PointCloud2::Shared
 
 		// if ( point.y > 0.0 && abs(point.x)*azimuth_tan_constant < point.y && abs(point.z)*elevation_tan_constant < point.y )
 		// if ( (float)point.y > 0.0 && (float)point.y*(float)azimuth_tan_constant < (float)abs(point.x) && (float)point.y*(float)elevation_tan_constant < (float)abs(point.z) )
-		if ( (float)point.y > 0.0 && 
+		if ( (float)point.y > (float)_drone_threshold && 
 				(float)abs(point.x)/(float)point.y < (float)azimuth_tan_constant &&
 				(float)abs(point.z)/(float)point.y < (float)elevation_tan_constant )
 		{
 			cloud->push_back(point);
 		}
-		
-
-		// cloud->push_back(point);
 
 		ptr += POINT_STEP;
 	}
