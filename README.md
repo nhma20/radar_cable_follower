@@ -67,7 +67,7 @@ Maximum elevation angle of radar sensor. If a measurement is outside this angle 
 `ros2 param set /radar_pcl_filter_node radar_elevation_fov 40.0`
 
 Maximum azimuth angle of radar sensor. If a measurement is outside this angle it will be ignored (`float`):
-`ros2 param set /radar_pcl_filter_node radar_elevation_fov 120.0`
+`ros2 param set /radar_pcl_filter_node radar_azimuth_fov 120.0`
 
 Command to clear global point cloud (`bool`):
 `ros2 param set /radar_pcl_filter_node reset_global_point_cloud false`

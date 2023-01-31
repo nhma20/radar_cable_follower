@@ -5,8 +5,16 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 from launch.substitutions import PathJoinSubstitution
+from ament_index_python.packages import get_package_share_directory
+import os
 
 def generate_launch_description():
+    config = os.path.join(
+        get_package_share_directory('radar_cable_follower'),
+        'config',
+        'params.yaml'
+    )
+
     tf_drone_to_iwr = Node(
         package="tf2_ros",
         executable="static_transform_publisher",
@@ -31,12 +39,14 @@ def generate_launch_description():
 
     radar_pointcloud_filter = Node(
         package="radar_cable_follower",
-        executable="radar_pointcloud_filter"
+        executable="radar_pointcloud_filter",
+        parameters=[config]
     )
 
     offboard_control = Node(
         package="radar_cable_follower",
-        executable="offboard_control"
+        executable="offboard_control",
+        parameters=[config]
     )
 
 
