@@ -109,6 +109,8 @@ public:
 			"/fmu/rc_channels/out",	10,
             [this](px4_msgs::msg::RcChannels::ConstSharedPtr msg) {
               _rc_misc_state = msg->channels[7];
+			  _rc_height_state = msg->channels[6];
+			  
 			//   RCLCPP_INFO(this->get_logger(),  "\nRC MISC state: %f", _rc_misc_state);
 			});
 
@@ -203,6 +205,9 @@ private:
 	bool _new_takeoff = true;
 	float _rc_misc_state = -1;
 	float _prev_rc_misc_state = -2;
+
+	float _rc_height_state = -1;
+	float _prev_rc_height_state = -1;
 
     bool _printed_offboard = false;
 
@@ -308,7 +313,7 @@ void OffboardControl::publish_path() {
 
 void OffboardControl::mission_state_machine() {
 
-	if (! _in_offboard || _prev_rc_misc_state == _rc_misc_state)
+	if (! _in_offboard)
 	{
 		return;
 	}
@@ -333,25 +338,57 @@ void OffboardControl::mission_state_machine() {
 	// 	RCLCPP_INFO(this->get_logger(),  "\nIncreasing following speed\n");
 	// }
 
-	if (_rc_misc_state < -0.5)
+	if (_prev_rc_misc_state != _rc_misc_state)
 	{
-		RCLCPP_INFO(this->get_logger(),  "\nForward direction\n");
-		this->set_parameter(rclcpp::Parameter("powerline_following_speed", abs(_follow_speed)));
-	}
+	
+		if (_rc_misc_state < -0.5)
+		{
+			RCLCPP_INFO(this->get_logger(),  "\nForward direction\n");
+			_follow_speed = abs(_follow_speed);
+		}
 
-	if (_rc_misc_state > -0.5 && _rc_misc_state < 0.5)
+		if (_rc_misc_state > -0.5 && _rc_misc_state < 0.5)
+		{
+			RCLCPP_INFO(this->get_logger(),  "\nStop\n");
+			_follow_speed = 0.0;
+		}
+
+		if (_rc_misc_state > 0.5)
+		{
+			RCLCPP_INFO(this->get_logger(),  "\nReverse direction\n");
+			_follow_speed = -abs(_follow_speed);
+		}
+
+		this->set_parameter(rclcpp::Parameter("powerline_following_speed", _follow_speed));
+
+		_prev_rc_misc_state = _rc_misc_state;
+	}
+	
+
+	if (_prev_rc_height_state != _rc_height_state)
 	{
-		RCLCPP_INFO(this->get_logger(),  "\nStop\n");
-		this->set_parameter(rclcpp::Parameter("powerline_following_speed", 0.0));
-	}
 
-	if (_rc_misc_state > 0.5)
-	{
-		RCLCPP_INFO(this->get_logger(),  "\nReverse direction\n");
-		this->set_parameter(rclcpp::Parameter("powerline_following_speed", - abs(_follow_speed)));
-	}
+		if (_rc_height_state < -0.5)
+		{
+			RCLCPP_INFO(this->get_logger(),  "\n-1m following height\n");
+			_following_distance = _following_distance - 1.0;
+		}
 
-	_prev_rc_misc_state = _rc_misc_state;
+		if (_rc_height_state > -0.5 && _rc_height_state < 0.5)
+		{
+			RCLCPP_INFO(this->get_logger(),  "\nSame following height\n");
+		}
+
+		if (_rc_height_state > 0.5)
+		{
+			RCLCPP_INFO(this->get_logger(),  "\n+1m following height\n");
+			_following_distance = _following_distance + 1.0;
+		}
+
+		this->set_parameter(rclcpp::Parameter("powerline_following_distance", _following_distance));
+
+		_prev_rc_height_state = _rc_height_state;
+	}
 
 	// static int callback_count = 0;
 
@@ -596,8 +633,8 @@ void OffboardControl::publish_tracking_setpoint() {
 
 	float yaw_frac;
 	this->get_parameter("yaw_frac", yaw_frac);
-
-	this->get_parameter("powerline_following_speed", _follow_speed);
+	static float tmp_follow_speed;
+	this->get_parameter("powerline_following_speed", tmp_follow_speed);
 
 	orientation_t target_yaw_eul;
 
@@ -637,7 +674,7 @@ void OffboardControl::publish_tracking_setpoint() {
 	} _powerline_mutex.unlock();
 
 	point_t unit_x(
-		1.0 * _follow_speed,
+		1.0 * tmp_follow_speed,
 		0.0,
 		0.0
 	);
