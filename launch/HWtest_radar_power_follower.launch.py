@@ -34,7 +34,8 @@ def generate_launch_description():
             {'cfg_path': '/home/ubuntu/ros2_ws/src/iwr6843isk_ros2/cfg_files/xwr68xx_profile_25Hz_Elev_43m.cfg'},
             {'cli_port': '/dev/ttyUSB0'},
             {'data_port': '/dev/ttyUSB1'}
-         ]
+         ],
+        arguments=['--ros-args', '--log-level', 'warn']
     )
 
     radar_pointcloud_filter = Node(
