@@ -15,12 +15,18 @@ def generate_launch_description():
         'params.yaml'
     )
 
+    # tf_drone_to_iwr = Node(
+    #     package="tf2_ros",
+    #     executable="static_transform_publisher",
+    #     # arguments=["0", "0", "0.05", "0", "0", "0", "drone", "iwr6843_frame"] # Simulation (x, y, z, yaw, pitch, roll)
+    #     arguments=["0", "0", "0.05", "1.57", "0", "3.14", "drone", "iwr6843_frame"] # Simulation (x, y, z, yaw, pitch, roll)
+    #     #arguments=["0", "0", "0.05", "3.1415", "-1.57079632679", "0", "drone", "iwr6843_frame"] # Simulation
+    # )
     tf_drone_to_iwr = Node(
         package="tf2_ros",
         executable="static_transform_publisher",
-        # arguments=["0", "0", "0.05", "0", "0", "0", "drone", "iwr6843_frame"] # Simulation (x, y, z, yaw, pitch, roll)
-        arguments=["0", "0", "0.05", "1.57", "0", "3.14", "drone", "iwr6843_frame"] # Simulation (x, y, z, yaw, pitch, roll)
-        #arguments=["0", "0", "0.05", "3.1415", "-1.57079632679", "0", "drone", "iwr6843_frame"] # Simulation
+        # arguments=["0", "0", "0.05", "0", "0", "0", "drone", "iwr6843_frame"] # Simulation (x, y, z, yaw, roll, pitch)
+        arguments=["0", "0.0", "-0.08", "1.570796", "0.0", "-1.570796", "drone", "iwr6843_frame"] # Simulation (x, y, z, yaw, roll, pitch)
     )
 
     world_to_drone = Node(
