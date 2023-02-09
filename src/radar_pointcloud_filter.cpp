@@ -271,6 +271,8 @@ class RadarPCLFilter : public rclcpp::Node
 		float _radar_azimuth_fov;
 		bool _reset_global_point_cloud;
 
+		float _global_powerline_2d_angle = 0.0;
+
 		int _t_tries = 0;
 
 		bool _first_message = false;
@@ -931,10 +933,15 @@ std::vector<line_model_t> RadarPCLFilter::follow_point_extraction(pcl::PointClou
 		}
 
 	// create line model from hough angle and second highest point XYZ
+	// orientation_t hough_angle (
+	// 	0,
+	// 	0,
+	// 	-acos(axis(0))
+	// );
 	orientation_t hough_angle (
 		0,
 		0,
-		-acos(axis(0))
+		_global_powerline_2d_angle //-asin(axis(1))
 	);
 
 	std::vector<line_model_t> line_model_vec;
@@ -1655,6 +1662,7 @@ void RadarPCLFilter::direction_extraction_25D(pcl::PointCloud<pcl::PointXYZ>::Pt
 	dir_axis(1) = sin(powerline_2d_angle);
 	dir_axis(2) = 0;
 
+	_global_powerline_2d_angle = powerline_2d_angle;
 
 	if (_launch_with_debug > 0)
 	{	
