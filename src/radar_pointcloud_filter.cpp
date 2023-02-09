@@ -329,7 +329,7 @@ class RadarPCLFilter : public rclcpp::Node
 																Eigen::Vector3f axis);
 
 		std::vector<line_model_t> follow_point_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
-																Eigen::Vector3f axis);																						
+																float powerline_2d_angle);																						
 
 		void create_pointcloud_msg(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, sensor_msgs::msg::PointCloud2 * pcl_msg);
 
@@ -894,7 +894,7 @@ std::vector<line_model_t> RadarPCLFilter::parallel_line_extraction(pcl::PointClo
 }
 
 std::vector<line_model_t> RadarPCLFilter::follow_point_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
-																	Eigen::Vector3f axis) {
+																	float powerline_2d_angle) {
 	
 	if (cloud_in->size() > 10)
 	{
@@ -933,15 +933,10 @@ std::vector<line_model_t> RadarPCLFilter::follow_point_extraction(pcl::PointClou
 		}
 
 	// create line model from hough angle and second highest point XYZ
-	// orientation_t hough_angle (
-	// 	0,
-	// 	0,
-	// 	-acos(axis(0))
-	// );
 	orientation_t hough_angle (
 		0,
 		0,
-		_global_powerline_2d_angle //-asin(axis(1))
+		powerline_2d_angle
 	);
 
 	std::vector<line_model_t> line_model_vec;
@@ -2184,7 +2179,7 @@ void RadarPCLFilter::powerline_detection() {
 			}
 			else if (_line_or_point_follow == "point")
 			{
-				_line_models = RadarPCLFilter::follow_point_extraction(_pl_search_cloud, dir_axis);
+				_line_models = RadarPCLFilter::follow_point_extraction(_pl_search_cloud, _global_powerline_2d_angle);
 			}
 			else 
 			{
