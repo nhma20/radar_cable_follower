@@ -100,7 +100,7 @@ class RadarPCLFilter : public rclcpp::Node
 			this->declare_parameter<std::string>("line_or_point_follow", "line");
 			this->get_parameter("line_or_point_follow", _line_or_point_follow);
 
-			this->declare_parameter<int>("point_follow_outlier_filter", 0);
+			this->declare_parameter<int>("point_follow_outlier_filter", 1);
 			this->get_parameter("point_follow_outlier_filter", _point_follow_outlier_filter);
 
 			this->declare_parameter<std::string>("sensor_upwards_or_downwards", "downwards");
@@ -894,9 +894,11 @@ std::vector<line_model_t> RadarPCLFilter::parallel_line_extraction(pcl::PointClo
 std::vector<line_model_t> RadarPCLFilter::follow_point_extraction(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in,
 																	Eigen::Vector3f axis) {
 	
-	if (cloud_in->size() > 50)
+	if (cloud_in->size() > 10)
 	{
 		this->get_parameter("point_follow_outlier_filter", _point_follow_outlier_filter);
+
+		pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_cloud(new pcl::PointCloud<pcl::PointXYZ>);
 
 		if (_point_follow_outlier_filter > 0)
 		{
@@ -906,38 +908,41 @@ std::vector<line_model_t> RadarPCLFilter::follow_point_extraction(pcl::PointClou
 			sor.setInputCloud (cloud_in);
 			sor.setMeanK (5); // param this
 			sor.setStddevMulThresh (6.0); // and this?
-			sor.filter (*cloud_in);
+			sor.filter (*filtered_cloud);
 
 		}
 
 		// find highest point
 		pcl::PointXYZ max_z_point;
-		for (size_t i = 0; i < cloud_in->size (); ++i)
+		pcl::PointXYZ second_max_z_point;
+
+		for (size_t i = 0; i < filtered_cloud->size (); ++i)
 		{
 			// Check if the point is invalid
-			if (!std::isfinite ((*cloud_in)[i].x) || 
-				!std::isfinite ((*cloud_in)[i].y) || 
-				!std::isfinite ((*cloud_in)[i].z))
+			if (!std::isfinite ((*filtered_cloud)[i].x) || 
+				!std::isfinite ((*filtered_cloud)[i].y) || 
+				!std::isfinite ((*filtered_cloud)[i].z))
 				continue;
 
-			if ((*cloud_in)[i].z > max_z_point.z) {
-				max_z_point = (*cloud_in)[i];
+			if ((*filtered_cloud)[i].z > max_z_point.z) {
+				second_max_z_point = max_z_point;
+				max_z_point = (*filtered_cloud)[i];
 			}
 		}
 
-	// create line model from hough angle and highest point XYZ
+	// create line model from hough angle and second highest point XYZ
 	orientation_t hough_angle (
 		0,
 		0,
-		acos(axis(0))
+		-acos(axis(0))
 	);
 
 	std::vector<line_model_t> line_model_vec;
 	line_model_t line_model;
 
-	line_model.position(0) = max_z_point.x;
-	line_model.position(1) = max_z_point.y;
-	line_model.position(2) = max_z_point.z;
+	line_model.position(0) = second_max_z_point.x;
+	line_model.position(1) = second_max_z_point.y;
+	line_model.position(2) = second_max_z_point.z;
 
 	line_model.quaternion = eulToQuat(hough_angle);
 

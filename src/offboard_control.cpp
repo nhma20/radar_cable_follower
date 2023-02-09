@@ -313,10 +313,10 @@ void OffboardControl::publish_path() {
 
 void OffboardControl::mission_state_machine() {
 
-	if (! _in_offboard)
-	{
-		return;
-	}
+	//if (! _in_offboard)
+	//{
+	//	return;
+	//}
 
 	// if (_rc_misc_state < -0.5)
 	// {
