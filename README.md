@@ -1,7 +1,10 @@
 # radar_cable_follower
 ROS2 package for the radar_cable_follower
 
-For hardware setup, see:
+For publication information, see:  
+https://diii-sdu.github.io/radar_cable_follower/
+
+For hardware setup, see:  
 https://github.com/nhma20/radar_cable_follower_HW
 
 
