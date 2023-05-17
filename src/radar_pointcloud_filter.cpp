@@ -151,6 +151,9 @@ class RadarPCLFilter : public rclcpp::Node
 			this->declare_parameter<bool>("reset_global_point_cloud", false);
 			this->get_parameter("reset_global_point_cloud", _reset_global_point_cloud);
 			
+			this->declare_parameter<int>("plus_or_minus_yaw", 1);
+			this->get_parameter("plus_or_minus_yaw", _plus_or_minus_yaw);
+			
 			
 
 
@@ -159,6 +162,8 @@ class RadarPCLFilter : public rclcpp::Node
 			std::bind(&RadarPCLFilter::add_new_radar_pointcloud, this, std::placeholders::_1));
 
 			output_pointcloud_pub = this->create_publisher<sensor_msgs::msg::PointCloud2>("/world_pcl", 10);
+
+			input_pointcloud_pub = this->create_publisher<sensor_msgs::msg::PointCloud2>("/input_pcl", 10);
 
 			hough_line_pub = this->create_publisher<sensor_msgs::msg::Image>("/hough_line_img", 10);
 			
@@ -228,6 +233,9 @@ class RadarPCLFilter : public rclcpp::Node
 		rclcpp::TimerBase::SharedPtr _timer_pcl;
 
 		rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr output_pointcloud_pub;
+
+		rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr input_pointcloud_pub;
+
 		rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr hough_line_pub;
 		rclcpp::Publisher<radar_cable_follower_msgs::msg::TrackedPowerlines>::SharedPtr tracked_powerlines_pub;
 		rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr vis_tracked_powerlines_pub;
@@ -270,6 +278,7 @@ class RadarPCLFilter : public rclcpp::Node
 		float _radar_elevation_fov;
 		float _radar_azimuth_fov;
 		bool _reset_global_point_cloud;
+		int _plus_or_minus_yaw;
 
 		float _global_powerline_2d_angle = 0.0;
 
@@ -606,6 +615,10 @@ void RadarPCLFilter::add_new_radar_pointcloud(const sensor_msgs::msg::PointCloud
 		return;
 	}
 
+	auto pcl_msg = sensor_msgs::msg::PointCloud2();
+	RadarPCLFilter::create_pointcloud_msg(world_points, &pcl_msg);
+	input_pointcloud_pub->publish(pcl_msg);  
+
 	_concat_cloud_mutex.lock(); {
 
         RadarPCLFilter::concatenate_poincloud(world_points, _concat_cloud);
@@ -853,10 +866,12 @@ std::vector<line_model_t> RadarPCLFilter::parallel_line_extraction(pcl::PointClo
 			coefficients->values[2]
 		);
 
+		this->get_parameter("plus_or_minus_yaw", _plus_or_minus_yaw);
+
 		orientation_t temp_eul(
 			0,
 			0,
-			tmp_powerline_world_yaw
+			tmp_powerline_world_yaw * _plus_or_minus_yaw
 		);
 
 		quat_t pl_quat = eulToQuat(temp_eul);
